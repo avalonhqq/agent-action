@@ -14,15 +14,9 @@ dist/
 # Runtime data is created locally and must not be committed.
 data/*.db
 data/*.db-*
-data/uploads/*
-data/indexes/*
-data/parsed/*
 data/knowledge/*
 data/fixtures/*
 data/evaluation/*
-!data/uploads/.gitkeep
-!data/indexes/.gitkeep
-!data/parsed/.gitkeep
 !data/knowledge/.gitkeep
 !data/fixtures/.gitkeep
 !data/evaluation/.gitkeep
