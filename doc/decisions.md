@@ -37,3 +37,11 @@
 - 决策：代码位于 `src/bili_support`，依赖和质量工具集中在 `pyproject.toml`。
 - 原因：避免导入歧义，贴近可发布 Python 项目的工程实践。
 
+## ADR-007：吸收 Small-to-Big 与策略化混合检索
+
+- 日期：2026-07-15
+- 状态：已确认
+- 参考：[enterprise-rag-financial-reports](https://github.com/stevenfight/enterprise-rag-financial-reports)
+- 决策：引入 Child 召回/Parent 上下文、中文领域词典、批量 Rerank、意图驱动 RetrievalPolicy、多实体 Evidence Coverage 和检索调试链路。
+- 原因：这些能力能改善客服短问法召回、完整条款上下文、比较问题覆盖和检索可解释性。
+- 约束：不复制金融硬编码、内存会话、公开思维链、同步阻塞调用、单体检索文件和未经评估的固定阈值。

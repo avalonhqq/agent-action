@@ -57,6 +57,26 @@ flowchart TD
 - BM25：MVP 本地索引；索引版本与知识版本绑定。
 - Checkpoint Store：LangGraph 状态恢复。
 
+## 3.1 检索子流程
+
+```mermaid
+flowchart LR
+    Q["Standalone Query"] --> P["RetrievalPolicy"]
+    P --> F["FAQ"]
+    P --> B["BM25 + 领域词典"]
+    P --> V["Child Vector Search"]
+    F --> RRF["融合与去重"]
+    B --> RRF
+    V --> RRF
+    RRF --> PA["Parent 聚合"]
+    PA --> RR["批量 Rerank"]
+    RR --> C["多实体覆盖检查"]
+    C -->|缺失且可补检索| P
+    C --> E["证据上下文与引用"]
+```
+
+Rerank 失败时回退融合排序；补检索最多一次；低质量候选不能为了覆盖而强行进入答案。
+
 ## 4. 主工作流
 
 ```text
@@ -79,4 +99,3 @@ flowchart TD
 - `ObjectStorage`：本地 ↔ S3/OSS/MinIO。
 - `HumanHandoffService`：Mock ↔ 企业客服/工单系统。
 - `BusinessGateway`：仿真 PostgreSQL ↔ 企业领域 API。
-

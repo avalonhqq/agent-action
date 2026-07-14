@@ -37,7 +37,8 @@
 ## 4. AI 能力目标
 
 - OpenAI-compatible LLM Provider、Prompt 模板、结构化输出和 SSE。
-- 标准问、BM25、向量召回、RRF、去重和 Reranker。
+- Small-to-Big Parent/Child Chunk、标准问、中文 BM25、向量召回、RRF、去重和批量 Reranker。
+- 意图驱动、版本化 RetrievalPolicy，以及多实体证据覆盖保障。
 - Intent、Knowledge、领域 Agent、Verification 与 Supervisor。
 - LangGraph 确定性路由、Checkpoint、中断恢复和循环保护。
 - 高分直答、中分候选、低分澄清/人工的三段式策略。
@@ -85,8 +86,8 @@
 - 所有知识结论有可访问引用。
 - 越权和非本人数据查询被拦截。
 - 固定评估集可量化检索与回答质量。
+- 检索调试结果可展示 Child 命中、Parent 上下文、通道分数、策略版本和降级状态。
 - 单次请求可追踪 Agent、Retriever、LLM 和 Tool。
 - 模型或外部服务不可用时有明确降级。
 - Docker Compose 一条命令启动。
 - README 足以让第三方独立运行和演示。
-

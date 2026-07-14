@@ -6,5 +6,8 @@ from bili_support.main import app
 def test_health() -> None:
     response = TestClient(app).get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "bili-support-ai"
+    assert data["version"] == "0.0.1"
 

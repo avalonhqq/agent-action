@@ -18,7 +18,9 @@
 
 - 约 100 条 Golden Dataset。
 - 纯向量与混合检索对比报告。
+- 普通分块与 Small-to-Big 的召回、上下文 Token 和回答质量对比。
 - Recall@K、MRR、Faithfulness、引用正确率。
+- 多实体 Evidence Coverage、域外误拒绝率和 Query Rewrite 准确率。
 - 意图准确率、多意图召回率和工具参数准确率。
 - PII、Prompt Injection 和越权测试报告。
 
@@ -46,4 +48,3 @@
 - 技术选型、故障案例和量化优化数据。
 - 面试题库及答案。
 - 简历项目描述，所有指标必须来自实际评估，不虚构生产规模。
-

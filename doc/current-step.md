@@ -28,6 +28,7 @@ python -m pip install -e ".[dev]"
 ### 1. 运行当前基线
 
 ```powershell
+source .venv/Scripts/activate  
 uvicorn bili_support.main:app --reload --port 8010
 ```
 
