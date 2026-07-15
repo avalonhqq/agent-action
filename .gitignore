@@ -20,3 +20,4 @@ data/evaluation/*
 !data/knowledge/.gitkeep
 !data/fixtures/.gitkeep
 !data/evaluation/.gitkeep
+.obsidian/

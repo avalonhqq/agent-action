@@ -1,4 +1,6 @@
-# 当前任务：第 1 周 · Step 2
+# 已完成：第 1 周 · Step 2
+
+> 验收日期：2026-07-16。Ruff、mypy 和 8 项 pytest 全部通过；五道思考题通过。
 
 ## 主题
 
@@ -172,4 +174,3 @@ pytest
 ```text
 feat: add typed application settings
 ```
-
