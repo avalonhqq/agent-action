@@ -1,13 +1,21 @@
-"""Minimal application entry point for Week 1.
+"""Application entry point.
 
-Only the learning baseline is implemented. Business modules remain skeletons.
+Configuration is loaded from bili_support.core.config.
 """
 
 from fastapi import FastAPI
 
-app = FastAPI(title="BiliSupport AI", version="0.0.1")
+from bili_support.core.config import get_settings
+
+settings = get_settings()
+
+app = FastAPI(title=settings.app_name, version=settings.app_version)
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "service": "bili-support-ai", "version": "0.0.1"}
+    return {
+        "status": "ok",
+        "service": settings.app_name,
+        "version": settings.app_version,
+    }
