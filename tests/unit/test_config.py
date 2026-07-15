@@ -1,7 +1,6 @@
 """Unit tests for configuration settings."""
 
 import os
-import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +16,12 @@ def isolate_settings():
     for k in list(os.environ.keys()):
         if k.startswith("BILI_SUPPORT_"):
             del os.environ[k]
+    env_file = os.environ.pop("PYDANTIC_SETTINGS_FILE", None)
     yield
     reset_settings()
     os.environ.update(env_vars)
+    if env_file:
+        os.environ["PYDANTIC_SETTINGS_FILE"] = env_file
 
 
 def test_default_settings():
@@ -66,22 +68,45 @@ def test_production_debug_prohibited():
     assert "debug" in str(exc_info.value).lower() or "production" in str(exc_info.value).lower()
 
 
-def test_fastapi_title_version_from_settings():
+def test_fastapi_title_version_from_settings(tmp_path):
     os.environ["BILI_SUPPORT_APP_NAME"] = "Test App"
     os.environ["BILI_SUPPORT_APP_VERSION"] = "1.2.3"
     reset_settings()
 
-    modules_to_reload = [key for key in sys.modules.keys() if key.startswith("bili_support")]
-    for module in modules_to_reload:
-        del sys.modules[module]
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "BILI_SUPPORT_APP_NAME=Test App\n"
+        "BILI_SUPPORT_APP_VERSION=1.2.3\n"
+    )
+    os.environ["PYDANTIC_SETTINGS_FILE"] = str(env_file)
+
+    from bili_support.core.config import Settings
+
+    settings = Settings()
+    assert settings.app_name == "Test App"
+    assert settings.app_version == "1.2.3"
 
     from bili_support.main import app
 
-    assert app.title == "Test App"
-    assert app.version == "1.2.3"
+    assert app.title == settings.app_name
+    assert app.version == settings.app_version
 
     client = TestClient(app)
     response = client.get("/health")
     data = response.json()
-    assert data["service"] == "Test App"
-    assert data["version"] == "1.2.3"
+    assert data["service"] == settings.app_name
+    assert data["version"] == settings.app_version
+
+
+def test_env_file_isolation(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "BILI_SUPPORT_ENVIRONMENT=staging\n"
+        "BILI_SUPPORT_PORT=9000\n"
+    )
+
+    from bili_support.core.config import Settings
+
+    settings = Settings(_env_file=str(env_file))
+    assert settings.environment == Environment.STAGING
+    assert settings.port == 9000

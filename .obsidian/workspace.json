@@ -185,6 +185,8 @@
   },
   "active": "37482633da09ca50",
   "lastOpenFiles": [
+    "tests/unit/__pycache__/test_config.cpython-313-pytest-9.1.1.pyc.20040",
+    "tests/unit/__pycache__/test_config.cpython-313-pytest-9.1.1.pyc.37816",
     "tests/unit/__pycache__/test_config.cpython-313-pytest-9.1.1.pyc.29516",
     "tests/unit/__pycache__/test_config.cpython-313-pytest-9.1.1.pyc",
     "tests/unit/__pycache__/test_config.cpython-313-pytest-9.1.1.pyc.11680",
@@ -194,8 +196,6 @@
     "src/bili_support/__pycache__/main.cpython-313.pyc.1831403410352",
     "src/bili_support/core/__pycache__/config.cpython-313.pyc.1416809674032",
     "src/bili_support/core/__pycache__/config.cpython-313.pyc.1790479627440",
-    "src/bili_support/core/__pycache__/config.cpython-313.pyc",
-    "src/bili_support/core/__pycache__/config.cpython-313.pyc.2100310474288",
     "doc/progress.md",
     "doc/current-step.md",
     "doc/product-flow.md",
