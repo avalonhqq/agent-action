@@ -12,6 +12,7 @@ dependencies = [
   "fastapi>=0.121,<1.0",
   "pydantic>=2.12,<3.0",
   "pydantic-settings>=2.12,<3.0",
+  "structlog>=25,<27",
   "uvicorn[standard]>=0.38,<1.0",
 ]
 
@@ -45,4 +46,3 @@ select = ["E", "F", "I", "B", "UP", "ASYNC"]
 python_version = "3.12"
 strict = true
 packages = ["bili_support"]
-

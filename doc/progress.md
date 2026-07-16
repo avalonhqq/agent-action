@@ -2,7 +2,7 @@
 
 | 周 | 主题 | 状态 | 开始 | 完成 | 关键结果 |
 |---|---|---|---|---|---|
-| 1 | Python AI 工程基础 | 进行中 | 2026-07-14 |  | Step 1、Step 2 已通过；下一步进行统一响应与可观测性基础 |
+| 1 | Python AI 工程基础 | 已完成 | 2026-07-14 | 2026-07-17 | 23 项测试；配置、错误边界、Request ID、日志、探针、质量门禁和 Docker 基线 |
 | 2 | LLM、Prompt、结构化输出 | 未开始 |  |  |  |
 | 3 | Web 服务、会话、网站 | 未开始 |  |  |  |
 | 4 | 文档解析与知识入库 | 未开始 |  |  |  |
@@ -21,9 +21,9 @@
 |---|---|---|---|
 | 1 | src 布局、ASGI、健康接口 | 已完成 | Ruff/mypy/pytest 通过；健康响应与概念问答通过 |
 | 2 | 类型系统、Pydantic Settings、多环境配置 | 已完成 | Ruff/mypy/8 项 pytest 通过；完成配置校验、缓存、`.env` 隔离与应用工厂 |
-| 3 | 统一响应、异常、Request ID、结构化日志 | 未开始 |  |
-| 4 | `/ready`、质量工具、pre-commit | 未开始 |  |
-| 5 | Docker 基线与第 1 周复盘 | 未开始 |  |
+| 3 | 统一响应、异常、Request ID、结构化日志 | 已完成 | 统一错误契约；安全异常边界；Request ID 透传；structlog JSON 访问日志 |
+| 4 | `/ready`、质量工具、pre-commit | 已完成 | readiness 配置检查；Ruff/mypy/pytest hook 全部通过 |
+| 5 | Docker 基线与第 1 周复盘 | 已完成 | 非 root Docker/Compose 基线；完成报告与 22 道问答；本机未安装 Docker，镜像待构建验证 |
 
 ## 每周复盘模板
 
