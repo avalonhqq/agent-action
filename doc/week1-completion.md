@@ -59,7 +59,53 @@
 - Docker `HEALTHCHECK` 使用轻量 `/health`。
 - `compose.yaml` 提供当前 API 的一键启动入口。
 
-## 2. 当前请求处理流程
+## 2. 分步课程讲解
+
+### Step 1：src 布局、ASGI 与健康接口
+
+`src/bili_support` 布局要求测试从安装后的包导入代码，避免源码仅因处于仓库根目录而“意外可导入”。`pyproject.toml` 统一声明构建方式、依赖和质量工具。启动命令：
+
+```powershell
+python -m uvicorn bili_support.main:app --reload --host 127.0.0.1 --port 8010
+```
+
+其中 Uvicorn 负责网络连接，`bili_support.main` 是模块，`app` 是 FastAPI ASGI 实例。请求经过 Uvicorn 调用 ASGI 应用，再由 FastAPI 路由生成响应。`/health` 只证明进程能响应 HTTP，不查询数据库、模型或索引，避免外部故障引发错误重启。
+
+### Step 2：Pydantic Settings 与应用工厂
+
+业务代码不分散调用 `os.getenv()`，而依赖已经完成字符串转换、默认值处理和运行时校验的 Settings。配置覆盖顺序是：
+
+```text
+代码默认值 < .env < 系统环境变量 < 显式初始化参数
+```
+
+端口必须位于 1～65535；production 与 debug=true 的危险组合在启动阶段失败。`get_settings()` 使用缓存保证应用生命周期内配置一致，测试通过 `reset_settings()`、`tmp_path` 和 `monkeypatch` 隔离缓存、环境变量与本机 `.env`。`create_app(settings)` 让测试直接注入配置，不必删除 `sys.modules` 或修改全局应用。
+
+### Step 3：统一响应与异常边界
+
+业务成功使用 `ApiResponse[T]`，泛型保留具体 data 类型；失败使用独立 `ErrorResponse`，通过 `Literal[True/False]` 避免同时包含成功数据和错误的矛盾状态。HTTP 状态码表达协议类别，`ErrorCode` 表达稳定业务语义。
+
+核心业务只抛出框架无关的 `AppError`。FastAPI 边界分别处理预期业务错误、参数校验错误和未知异常。参数校验响应不回显原始输入；未知异常只返回通用 500，普通日志也不记录可能包含密码、SQL、路径或 PII 的异常原文。
+
+### Step 4：Request ID 与结构化日志
+
+ASGI 中间件从 `X-Request-ID` 读取上游标识，只接受 1～128 位安全字符；缺失或非法时生成 UUID。ID 同时写入 `request.state`、ContextVar、响应头、错误体和访问日志。
+
+ContextVar 能隔离同一线程上并发执行的 asyncio Task，比全局变量或普通线程局部变量更适合 FastAPI 和后续 Agent 调用。访问日志使用 `perf_counter()` 计算耗时，并在 `finally` 中输出，确保失败请求也有记录且上下文得到清理。日志只记录 method、path、status、duration 和 Request ID，不记录 query value 或请求体。
+
+### Step 5：存活与就绪探针
+
+`/health` 回答“进程是否活着”；`/ready` 回答“服务能否接收业务流量”。第一周没有数据库和模型等强制依赖，因此 readiness 只报告启动时已经校验的配置。后续加入数据库、索引或强制 Provider 时，在 `/ready` 增加带超时的依赖检查，而不是扩展 `/health`。
+
+### Step 6：Ruff、mypy、pytest 与 pre-commit
+
+Ruff 检查常见代码错误和风格；mypy strict 检查静态类型边界；pytest 验证运行时行为。pre-commit 在提交前串联三项门禁，但不能替代 CI，因为本地钩子可以被跳过，运行环境也不等于干净的持续集成环境。`scripts/quality.py` 明确选择项目 `.venv`，避免 PATH 中的 Conda Python 导致钩子找不到依赖。
+
+### Step 7：Docker 基线
+
+Dockerfile 使用 Python 3.12 slim、非 root 用户和 exec 形式启动 Uvicorn。`.dockerignore` 排除 `.env`、Git 历史、虚拟环境、缓存和本地数据。Docker `HEALTHCHECK` 调用轻量 `/health`；Compose 提供当前 API 的一键启动入口。当前机器未安装 Docker，因此完成了配置、YAML、Python wheel 和静态检查，但没有伪报镜像构建成功。
+
+## 3. 当前请求处理流程
 
 ```text
 HTTP 请求
@@ -71,7 +117,7 @@ HTTP 请求
 → 输出不含请求敏感值的结构化访问日志
 ```
 
-## 3. 第一周遇到的问题与修复
+## 4. 第一周遇到的问题与修复
 
 ### 3.1 测试受到本机 `.env` 影响
 
@@ -102,7 +148,7 @@ HTTP 请求
 - 修复：访问日志除绑定 ContextVar 外，也显式写入 `request_id`。
 - 经验：关键日志字段应形成可直接测试的稳定契约。
 
-## 4. 第一周问题与参考答案
+## 5. 第一周问题与参考答案
 
 ### 4.1 工程与 ASGI
 
@@ -202,7 +248,7 @@ HTTP 状态码粒度较粗，客户端可能需要稳定业务分支。业务错
 
 `sh -c` 用于展开端口环境变量，`exec` 再让 Python/Uvicorn 成为容器主进程，从而正确接收 SIGTERM 等停止信号，支持优雅退出。
 
-## 5. 验收结果
+## 6. 验收结果
 
 | 门禁 | 结果 |
 |---|---|
@@ -215,7 +261,7 @@ HTTP 状态码粒度较粗，客户端可能需要稳定业务分支。业务错
 
 测试中的 Starlette `TestClient` 弃用警告来自当前上游依赖组合，不影响第一周功能；未通过全局关闭 warning 的方式掩盖。
 
-## 6. 当前商业化边界
+## 7. 当前商业化边界
 
 - `/ready` 目前只有配置检查，后续数据库、索引和必要 Provider 接入后必须扩展。
 - 当前仅应用访问日志结构化，Uvicorn 自身日志统一将在生产化阶段完善。

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "doc/week1-completion.md",
+                "file": "doc/current-step.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "week1-completion"
+              "title": "current-step"
             }
           }
         ]
@@ -185,9 +185,11 @@
   },
   "active": "37482633da09ca50",
   "lastOpenFiles": [
+    "src/bili_support/llm/types.py",
+    "README.md",
+    "doc/week1-completion.md",
     "doc/current-step.md",
     "doc/learning-plan.md",
-    "doc/week1-completion.md",
     "scripts/quality.py",
     "scripts",
     "compose.yaml",
@@ -207,7 +209,6 @@
     "doc/product-flow.md",
     "doc/source-plan-alignment.md",
     "doc/reference-enterprise-rag-review.md",
-    "README.md",
     "customer/doc/current-step.md",
     "doc/quality-gates.md",
     "customer/pytest-cache-files-3ajvpd2c/README.md"
