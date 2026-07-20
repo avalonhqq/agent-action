@@ -9,16 +9,22 @@ description = "A learning-first, enterprise-style multi-agent customer service p
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "aiomysql>=0.3,<1.0",
+  "aiosqlite>=0.22,<1.0",
+  "alembic>=1.17,<2.0",
   "fastapi>=0.121,<1.0",
+  "httpx>=0.28,<1.0",
+  "nicegui>=3.7,<4.0",
   "pydantic>=2.12,<3.0",
   "pydantic-settings>=2.12,<3.0",
+  "redis>=7.0,<8.0",
+  "sqlalchemy[asyncio]>=2.0.44,<3.0",
   "structlog>=25,<27",
   "uvicorn[standard]>=0.38,<1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1.0",
   "mypy>=1.18,<2.0",
   "pre-commit>=4.0,<5.0",
   "pytest>=9.0,<10.0",

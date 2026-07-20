@@ -1,234 +1,256 @@
-# BiliSupport AI：12 周全 Python 学习计划
+# BiliSupport AI：12 周大模型专项学习计划
 
-## 1. 学习闭环
+> 课程模式自 2026-07-20 起调整为“大模型核心由学习者重点掌握，非 AI 工程底座由 Codex 自动实现并通过质量门禁”。
 
-每周围绕同一主项目完成：
+## 1. 新的学习边界
+
+你只需要重点学习和参与以下内容：
+
+- Prompt 设计、结构化输出、模型参数和上下文治理。
+- 意图识别、实体抽取、置信度与错误分析。
+- 文档语义表示、Chunk 策略、Embedding、检索、Rerank 和 RAG。
+- LangGraph、Agent、Tool Calling、记忆和状态管理。
+- 幻觉控制、事实校验、安全、模型评估和效果优化。
+
+下列基础任务默认由 Codex 自动完成，不再作为你的编码作业：
+
+- FastAPI CRUD、Pydantic 请求响应、SQLAlchemy、Alembic 和 Repository。
+- 文件上传、任务状态、分页、鉴权接线和普通管理页面。
+- Docker/Compose、配置、日志、指标接线和测试脚手架。
+- Mock 数据、Fixture、CLI、迁移和重复性工程代码。
+
+自动完成不代表降低标准。所有自动底座仍需通过 Ruff、strict mypy、pytest、迁移验证和必要的集成测试，然后才进入 AI 实验。
+
+## 2. 新的学习闭环
 
 ```text
-概念学习 → 设计讨论 → 你编码 → 自动测试
-→ 演示验收 → 代码评审 → 问题复盘 → 文档留档
+Codex 自动补齐工程前置
+→ 全量质量门禁
+→ 大模型概念讲解
+→ AI Schema / Prompt / Policy 设计
+→ 小规模实验
+→ 指标与失败样本分析
+→ 改进与回归
+→ 文档留档
 ```
 
-工作日建议每天 2 小时：40 分钟概念、70 分钟编码、10 分钟记录。周末安排 3～5 小时集成、评估和复盘。
+你每个模块主要完成四件事：
 
-## 2. 12 周总览
+1. 能解释核心原理和方案取舍。
+2. 参与 AI 接口、Prompt、状态或检索策略设计。
+3. 阅读评估结果并分析失败样本。
+4. 对关键 AI 代码做小范围修改和实验，而不是编写通用 CRUD。
 
-| 周 | 主题 | 可演示增量 |
-|---|---|---|
-| 1 | Python AI 工程基础 | 标准工程、配置、日志、健康检查、Docker |
-| 2 | LLM、Prompt、结构化输出 | 普通聊天、SSE、上下文和模型指标 |
-| 3 | Web 服务、会话、网站 | 可使用的客服网站雏形 |
-| 4 | 文档解析与知识入库 | 可追踪、可重试的知识流水线 |
-| 5 | Embedding 与基础 RAG | 带真实引用的知识问答 |
-| 6 | FAQ、混合检索与评估 | 三段式客服检索和对比报告 |
-| 7 | LangGraph 工作流 | 可回放、可恢复的客服主流程 |
-| 8 | 多 Agent 与复合意图 | 专业 Agent 路由和结果聚合 |
-| 9 | 受控 Tool Calling | 仿真业务查询、权限、幂等和确认 |
-| 10 | 事实校验、安全与人工 | Verification、PII、防注入和交接包 |
-| 11 | 评估、观测与生产化 | 一键评估、追踪、限流和 Compose |
-| 12 | 完整交付与面试 | 三端页面、Demo、报告、简历和题库 |
+## 3. 12 周重新安排
 
-## 第 1 周：Python AI 工程基础与项目初始化
+| 周 | 学习主题 | 你的大模型重点 | 自动完成的基础配套 | 状态 |
+|---|---|---|---|---|
+| 1 | Python AI 工程基线 | 理解类型、安全边界和异步调用 | 工程、配置、日志、探针、Docker | 已完成 |
+| 2 | LLM 调用与 Prompt | Provider、Prompt、结构化输出、SSE、上下文 | HTTP 适配、错误映射、配置接线 | 已完成 |
+| 3 | 持久化对话与记忆底座 | 理解消息历史如何进入模型上下文 | 数据库、迁移、鉴权、会话 API、NiceGUI | 已完成 |
+| 4 | 意图识别与结构化决策 | 多标签意图、实体、风险、置信度、Few-shot、评估 | 数据集读写、评估 CLI/API、报告页面 | 下一阶段 |
+| 5 | RAG 知识表示与 Chunk | 结构恢复、Small-to-Big、表格语义、元数据 | PDF/DOCX/MD/TXT Loader、任务表、上传和重试接口 | 未开始 |
+| 6 | Embedding 与向量检索 | 向量语义、相似度、Top-K、Query Rewrite、过滤 | FAISS 持久化、索引版本、调试接口 | 未开始 |
+| 7 | 混合检索、Rerank 与策略 | BM25、RRF、Reranker、RetrievalPolicy、多实体覆盖 | FAQ CRUD、领域词典管理、评估报表 | 未开始 |
+| 8 | 证据约束生成与 RAG 评估 | Grounded Prompt、引用、拒答、Faithfulness、Answer Relevancy | 引用接口、Golden Dataset 管理、批量运行器 | 未开始 |
+| 9 | LangGraph 状态化工作流 | State、Node、Edge、Checkpoint、循环保护和恢复 | Checkpoint 存储、流程调试页和持久化接线 | 未开始 |
+| 10 | 多 Agent 与 Tool Calling | Supervisor、任务拆解、并发聚合、工具选择和确认 | Mock 业务服务、权限表、审计表和管理接口 | 未开始 |
+| 11 | 校验、安全与模型观测 | Verification、注入防护、PII、降级、模型指标和回归 | OpenTelemetry、限流、告警、压测和运维页面 | 未开始 |
+| 12 | 效果优化与最终交付 | 端到端误差分析、策略调优、模型选型和面试表达 | Demo 包装、部署脚本、运行手册和展示页面 | 未开始 |
 
-### 知识点
+## 4. 第 1～3 周：已完成前置
 
-类型系统、Enum/dataclass/TypedDict、Pydantic v2、asyncio、FastAPI、配置、异常、structlog、pytest、Ruff、mypy、pre-commit、Docker。
+### 第 1 周：工程基线
 
-### 实施顺序
+已完成类型化配置、错误边界、Request ID、结构化日志、探针、质量门禁和 Docker 基线。这些内容不再作为后续课程重点，只在影响模型可靠性时解释。
 
-1. 理解 `src` 布局、包导入和 ASGI。
-2. 完善 `/health`，新增 `/ready`。
-3. 实现 Settings 和 local/test/staging/production。
-4. 实现统一响应、异常、Request ID 和结构化日志。
-5. 配置 Ruff、mypy、pytest、pre-commit。
-6. 增加 Dockerfile 和开发启动方式。
+### 第 2 周：LLM 调用基础
 
-### 周产出与验收
+已完成内部 `LLMProvider`、确定性 Mock、OpenAI-compatible Adapter、Prompt 版本、Pydantic 结构化输出、超时重试、SSE、上下文窗口、Query Rewrite 和安全 Usage 记录。
 
-- 可运行 FastAPI 工程；Ruff、mypy、pytest 通过。
-- `/health` 不依赖外部服务；`/ready` 检查必需依赖。
-- production 危险配置启动失败。
-- Docker 可启动并通过健康检查。
+需要保留的 AI 基础知识：消息角色、Temperature、Token、结构化输出双重校验、Prompt 版本、取消传播和不保存私有思维链。
 
-## 第 2 周：LLM API、Prompt 与结构化输出
+### 第 3 周：对话记忆底座
 
-### 知识点
+已自动完成用户、会话、消息、模型调用、迁移、Repository/Service、简单鉴权、持久化 SSE 和 NiceGUI。你只需理解：数据库历史不是模型记忆，只有经过裁剪、摘要和权限过滤后放入请求的内容才是模型可见上下文。
 
-消息角色、Token、Temperature、上下文窗口、Prompt、JSON Schema、SSE、超时、重试、取消、历史裁剪和摘要。
+## 5. 第 4 周：意图识别与结构化决策
 
-### 项目任务
+### 你的学习重点
 
-- 定义 `LLMProvider`，实现确定性 Mock 和 OpenAI-compatible Adapter。
-- 普通聊天和 SSE 流式接口。
-- Pydantic 结构化输出和解析失败降级。
-- Prompt 版本管理、Token、耗时和错误记录。
-- 实现有界对话窗口、历史摘要和 standalone query 改写；测试“那联通呢”一类指代问题与过度改写。
-- 只记录结构化决策和原因码，不保存或对外返回模型私有思维链。
+- 单标签与多标签意图的区别。
+- `supported`、`out_of_domain`、`chitchat`、`unsafe` 顶层判定。
+- 业务域、动作、实体、情绪、风险等级和是否需要澄清。
+- Pydantic/JSON Schema 约束模型输出。
+- Zero-shot、Few-shot 和规则/模型混合路由。
+- 置信度不是事实概率：阈值必须通过评估校准。
+- Accuracy、Macro-F1、混淆矩阵、误拒绝率和高风险漏判率。
 
-### 验收
+### AI 实践
 
-客户端断开可取消任务；模型不可用有明确错误/降级；结构化输出可测试。
+1. 定义 `IntentDecision` 和业务意图枚举。
+2. 设计 `intent_classification:v1` Prompt。
+3. 为复合问题输出多个子意图和实体。
+4. 建立包含域外、闲聊、注入和模糊表达的评估集。
+5. 对比规则基线、Zero-shot 和 Few-shot。
+6. 分析至少 10 个失败样本并迭代 v2。
 
-## 第 3 周：FastAPI 业务服务、会话与 NiceGUI
+### Codex 自动完成
 
-### 知识点
-
-依赖注入、中间件、SQLAlchemy 2 异步、PostgreSQL、Alembic、Repository/Service、鉴权、SSE 页面。
-
-### 项目任务
-
-- 用户、会话、消息、模型调用表和迁移。
-- 创建会话、发送消息、历史查询。
-- Thread ID、用户上下文和简单 Token 鉴权。
-- NiceGUI 聊天页和流式渲染。
+- 评估数据文件格式、加载器、批量运行器和 CLI。
+- 结果落库、评估 API、混淆矩阵数据和报告页面。
+- Mock 分类 Provider、Fixture、日志接线和测试脚手架。
 
 ### 验收
 
-用户可继续历史会话；迁移幂等；请求、消息和模型调用可关联追踪。
+- 结构化输出解析失败可安全降级。
+- 域外问题默认跳过知识检索。
+- 复合意图不会被强行压成单标签。
+- 固定评估集输出 Macro-F1、误拒绝率和高风险漏判率。
+- Prompt v1/v2 的变化和指标差异可回溯。
 
-## 第 4 周：异构文档解析与知识入库
+## 6. 第 5 周：RAG 知识表示与 Chunk
 
-### 知识点
+### 你的学习重点
 
-PDF、DOCX、MD、TXT、CSV、HTML，文件签名、哈希、结构恢复、分块、元数据、权限、有效期、任务状态机和幂等。
+- 文档结构为何影响检索，而不仅是字符切片。
+- Parent/Child Small-to-Big：Child 召回、Parent 提供完整上下文。
+- Policy、Manual、FAQ、Table 和 Generic 的不同分块策略。
+- 标题路径、页码、版本、权限、业务域和有效期元数据。
+- 表格如何转成包含表头、行标签、单位和业务对象的自包含文本。
 
-### 项目任务
+### Codex 自动完成
 
-- Loader Registry 和统一 ParsedDocument。
-- Policy、Manual、FAQ、Table、Generic Chunker。
-- 增加 Small-to-Big：子块用于 Embedding/BM25 召回，父块用于 Rerank 和 LLM 上下文。
-- 对表格生成包含表头、行标签、单位和业务对象的自包含检索文本。
-- 文档、Chunk、任务表；上传、状态、重试和删除接口。
-- 保留 parent_id/child_id、标题路径、页码、版本、权限、业务域和有效期。
-
-### 验收
-
-至少四类文档；Parent/Child Chunk 可回溯原文；表格语义不丢失；重复上传不重复入库；失败可重试。
-
-## 第 5 周：Embedding、FAISS 与基础 RAG
-
-### 知识点
-
-Embedding、余弦相似度、FAISS、Top-K、Query Rewrite、上下文预算、证据约束和引用。
-
-### 项目任务
-
-- `EmbeddingProvider` 与可复现 Mock。
-- FAISS 索引和索引版本；以 Child Chunk 建索引，保存 Parent 映射。
-- 向量检索接口和基础 RAG Pipeline。
-- 实现独立 `/retrieve` 调试能力，返回 Child 命中、Parent 聚合和来源信息。
-- 返回标题、章节、页码、版本、parent_id、child_id 和索引版本。
-- 建立首批 Golden Dataset。
+PDF、DOCX、Markdown、TXT Loader，文件哈希、上传/状态/重试/删除接口，文档/任务/Chunk 表及迁移。
 
 ### 验收
 
-无证据明确拒答；权限/业务域过滤生效；固定集可计算 Recall@K。
+至少四类文档可入库；Parent/Child 可追溯；表格语义不丢失；重复文件幂等；失败任务可重试。
 
-## 第 6 周：FAQ、混合检索、重排与 RAG 评估
+## 7. 第 6 周：Embedding 与向量检索
 
-### 知识点
+### 你的学习重点
 
-标准问、相似问、审核答案、BM25、RRF、Reranker、阈值、MRR、Faithfulness、Answer Relevancy。
+Embedding 语义、余弦相似度、Top-K、维度和归一化；Query Rewrite；元数据过滤；上下文预算；召回率与延迟取舍。
 
-### 项目任务
+### AI 实践
 
-- FAQ 模型、导入和审核状态。
-- FAQ + 中文 BM25 + Vector 多路召回，维护审核过的哔哩哔哩领域词典和查询扩展表。
-- RRF、Parent 去重、批量 Reranker 和元数据过滤；Rerank 超时回退融合排序并显式标记 degraded。
-- 建立版本化 RetrievalPolicy，按意图配置 BM25/Vector 权重、候选预算、Rerank 数量和阈值。
-- 实现多实体 Evidence Coverage：公平召回、覆盖检查和最多一次定向补检索。
-- 高分直答、中分候选、低分澄清/人工。
-- 扩充约 100 条评估数据并生成对比报告。
+- `EmbeddingProvider` 和可复现 Mock。
+- Child Chunk 建索引、Parent 聚合。
+- 独立 `/retrieve` 调试输出。
+- 首批 Golden Dataset 和 Recall@K。
 
-### 验收
+### Codex 自动完成
 
-混合检索相对纯向量在 Recall@5/MRR 有实际提升；Small-to-Big 与普通分块有对比；多实体问题计算 Evidence Coverage；所有结果记录策略版本和阶段分数。
+FAISS 文件管理、索引版本、数据库映射、重建任务、管理 API 和页面。
 
-## 第 7 周：LangGraph 确定性工作流
+## 8. 第 7 周：混合检索、Rerank 与策略
 
-### 知识点
+### 你的学习重点
 
-State、Node、Edge、Conditional Edge、Checkpoint、中断恢复、Human-in-the-loop、循环保护和回放。
+中文 BM25、审核词典、Query Expansion、RRF、去重、批量 Reranker、阈值校准、意图驱动 RetrievalPolicy 和多实体 Evidence Coverage。
 
-### 项目任务
+### AI 实践
 
-建立输入、安全、意图、路由、检索/工具、校验、决策、回答/澄清/人工主流程，并记录节点输入输出摘要。
+- FAQ + BM25 + Vector 三路召回。
+- 意图对应候选预算和权重。
+- Rerank 失败时回退融合排序。
+- 比较纯向量、混合检索和 Rerank 后的 Recall@5/MRR。
 
-### 验收
+### Codex 自动完成
 
-节点独立测试；相同状态可回放；失败进入显式降级；最大步骤有效。
+FAQ 管理、词典存储、批量任务、结果持久化和对比报告页面。
 
-## 第 8 周：多 Agent 与复合意图
+## 9. 第 8 周：证据约束生成与 RAG 评估
 
-### 知识点
+### 你的学习重点
 
-Agent/Workflow 边界、多标签意图、实体、情绪、风险、任务拆解、并发和冲突聚合。
+Grounded Generation、引用格式、证据冲突、无证据拒答、答案完整性、Faithfulness、Answer Relevancy 和 LLM-as-Judge 的偏差。
 
-### 项目任务
+### AI 实践
 
-实现 Supervisor、Intent、Knowledge、Membership/Order、Creator、Account、Community、Technical Agent 的输入输出 Schema 和授权范围；Intent 同时识别 supported、out_of_domain、chitchat、unsafe，并在域外时跳过检索。
+- 只允许使用检索证据的回答 Prompt。
+- 引用声明和证据映射的结构化输出。
+- 高分回答、中分澄清、低分拒答/人工策略。
+- 批量评估并人工复核失败样本。
 
-### 验收
+### Codex 自动完成
 
-复合问题可拆解；域外问题不会无意义调用 RAG；Supervisor 不生成业务事实；Agent 不能越权使用工具；路由有评估集并统计误拒绝率。
+评估任务、结果存储、引用展示、报告导出和回归脚本。
 
-## 第 9 周：受控 Tool Calling 与仿真业务系统
+## 10. 第 9 周：LangGraph 状态化工作流
 
-### 知识点
+### 你的学习重点
 
-Function Calling、参数模型、工具注册、权限矩阵、归属、幂等、超时、重试、二次确认和审计。
+State、Node、Conditional Edge、Checkpoint、中断恢复、Human-in-the-loop、有限循环和可回放性。重点理解“确定性工作流控制模型”，而不是让模型自由决定所有步骤。
 
-### 项目任务
+### AI 实践
 
-实现仿真用户、会员、订单、退款、稿件、处罚、工单工具；禁止任意 SQL。
+建立输入、安全、意图、检索/工具、Verification、决策和回答/澄清/人工节点；定义每个节点的结构化输入输出。
 
-### 验收
+### Codex 自动完成
 
-非本人数据被拦截；重复写不重复执行；失败不伪造成功；调用可按 Request ID 审计。
+Checkpoint 数据库、运行记录、流程调试 API、可视化页面和恢复接线。
 
-## 第 10 周：事实校验、安全与人工技能组
+## 11. 第 10 周：多 Agent 与 Tool Calling
 
-### 知识点
+### 你的学习重点
 
-Prompt Injection、文档注入、PII、RBAC、最小权限、事实校验、冲突和人工降级。
+Agent 与 Workflow 边界、Supervisor、复合任务拆解、并发聚合、冲突处理、Function Calling、工具选择、参数约束、二次确认和工具结果不可伪造。
 
-### 项目任务
+### AI 实践
 
-- 输入、日志、上下文和输出四层脱敏。
-- Verification Agent 校验证据有效期、归属、冲突和敏感信息。
-- Mock HumanHandoffService 和结构化交接包。
+- Intent、Knowledge、Membership/Order、Creator、Account、Community、Technical、Verification Agent。
+- Agent 授权范围和输出 Schema。
+- 会员、订单、稿件、处罚等受控工具。
+- 复合问题拆解与结果合并评估。
 
-### 验收
+### Codex 自动完成
 
-无证据不回答；PII 不进入普通日志；高风险自动转人工；不实现坐席排队。
+Mock 业务数据、工具 CRUD、权限矩阵存储、幂等键、审计接口和管理页面。
 
-## 第 11 周：评估、可观测、性能与生产化
+## 12. 第 11 周：校验、安全与模型观测
 
-### 知识点
+### 你的学习重点
 
-Golden Dataset、RAGAS、OpenTelemetry、首 Token/总延迟、限流、熔断、缓存、备份和 Docker Compose。
+Prompt Injection、文档注入、PII、事实有效期、证据归属、输出校验、降级、首 Token 延迟、总延迟、Token、成本、模型兼容性和回归漂移。
 
-### 项目任务
+### AI 实践
 
-- 一键运行意图、检索、回答、工具和安全评估。
-- 打通 Request→Graph→LLM→Retriever→Tool 链路。
-- 增加 Embedding/Rerank/LLM Provider 契约与模型兼容性验证脚本。
-- 指标、超时、限流、降级、压测和 Compose。
-- 建立新开发者指南、Provider 排错、项目问题记录和上线检查清单。
+- Verification Agent 和结构化原因码。
+- 输入/上下文/输出安全策略。
+- 模型、Prompt、检索策略版本联合回归。
+- 高风险自动人工交接。
 
-### 验收
+### Codex 自动完成
 
-可定位单次请求；模型不可用有降级；核心接口有集成测试；一条命令启动。
+脱敏工具接线、OpenTelemetry、限流、熔断、压测、告警、Mock 人工服务和运维页面。
 
-## 第 12 周：完整项目交付、简历与面试
+## 13. 第 12 周：优化与最终交付
 
-### 项目任务
+### 你的学习重点
 
-- 完成聊天端、知识端和评估端。
-- 准备 10～15 个演示场景。
-- 架构图、时序图、技术取舍、故障案例和真实优化数据。
-- 完整 README、运行手册、Demo 视频、简历描述和面试题库。
+- 从意图、召回、重排、生成、工具和安全六层定位错误。
+- 比较模型、Prompt、Chunk、检索策略和阈值。
+- 用真实评估数据说明取舍，而不是只展示成功案例。
+- 能清晰讲述架构、失败案例、优化过程和边界。
 
 ### 最终验收
 
-网站支持多轮、知识问答、受控业务查询和人工交接；回答有引用；安全与评估可复现；Docker Compose 可启动。
+- 知识答案有可访问引用，无证据明确拒答。
+- 复合意图、受控工具和人工交接可演示。
+- 固定数据集可一键评估并对比版本。
+- 单次请求可追踪 Intent、Retriever、Reranker、LLM、Agent 和 Tool。
+- README、架构图、运行手册、Demo、简历描述和面试题库完整。
+
+## 14. 每个模块的固定交付物
+
+每个后续模块都必须留下：
+
+1. AI 目标与核心原理。
+2. 自动完成的工程底座清单。
+3. Prompt、Schema、Policy 或 Graph 版本。
+4. Golden Dataset 或针对性测试集。
+5. 指标结果与失败样本。
+6. 设计决策、已知边界和下一步。
+7. Ruff、mypy、pytest 和专项评估结果。

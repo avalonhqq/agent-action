@@ -17,14 +17,14 @@
 | 能力 | 参考价值 | BiliSupport AI 适配方式 | 计划位置 |
 |---|---|---|---|
 | Small-to-Big | 高 | 子块用于召回，父块用于上下文，保留 parent/child/页码关系 | 第 4～5 周 |
-| 表格预处理 | 高 | 会员权益、退款时效、规则表格转为自包含文本 | 第 4 周 |
-| 中文 BM25 词典 | 高 | 建立大会员、UP 主、稿件、弹幕、充电等领域词典 | 第 6 周 |
-| 受控 Query Expansion | 高 | 只使用审核词典，保存命中的扩展词及版本 | 第 6 周 |
+| 表格预处理 | 高 | 会员权益、退款时效、规则表格转为自包含文本 | 第 5 周 |
+| 中文 BM25 词典 | 高 | 建立大会员、UP 主、稿件、弹幕、充电等领域词典 | 第 7 周 |
+| 受控 Query Expansion | 高 | 只使用审核词典，保存命中的扩展词及版本 | 第 7 周 |
 | 意图驱动检索策略 | 高 | 不同意图配置 BM25/Vector 权重、Top-K、Rerank 和阈值 | 第 6/8 周 |
-| 批量 Rerank | 高 | Provider 批量评分，失败回退融合排序，记录耗时 | 第 6 周 |
+| 批量 Rerank | 高 | Provider 批量评分，失败回退融合排序，记录耗时 | 第 7 周 |
 | 域外拦截 | 高 | 区分 supported/unsupported/chitchat/unsafe，避免无意义检索 | 第 8/10 周 |
 | 多轮指代消解 | 高 | 有界历史 + 摘要生成 standalone query，不拼接无限历史 | 第 2～3 周 |
-| 多实体覆盖保障 | 高 | 比较多个会员方案/规则/业务对象时保证证据覆盖和多样性 | 第 6 周 |
+| 多实体覆盖保障 | 高 | 比较多个会员方案/规则/业务对象时保证证据覆盖和多样性 | 第 7 周 |
 | 检索调试接口 | 高 | 返回通道、原始分、融合分、重排分、parent/child、策略版本 | 第 5～6 周 |
 | Rerank 降级 | 高 | 云端失败时回退 RRF/hybrid，不伪造 rerank 分数 | 第 6/11 周 |
 | 新人指南/上线清单/问题库 | 高 | 增加故障记录、Provider 验证和发布检查清单 | 第 1～12 周 |
@@ -46,7 +46,7 @@
 
 ### 4.3 内存会话
 
-简单 `ConversationManager` 和全局字典不适合多实例客服系统。BiliSupport AI 使用 PostgreSQL 会话/消息，并通过 Checkpoint Store 恢复 Graph 状态。
+简单 `ConversationManager` 和全局字典不适合多实例客服系统。BiliSupport AI 使用 MySQL 保存会话/消息、Redis 缓存短期历史，并通过后续 Checkpoint Store 恢复 Graph 状态。
 
 ### 4.4 同步调用与单体检索文件
 
@@ -117,4 +117,3 @@ community.rule_explanation:
 - 多实体问题必须计算 Evidence Coverage。
 - 所有检索结果能看到策略版本及每阶段分数。
 - 域外拦截既测试召回减少，也测试误拒绝率。
-

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from functools import lru_cache
 
-from pydantic import ValidationInfo, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -24,6 +24,11 @@ class LogLevel(StrEnum):
     CRITICAL = "CRITICAL"
 
 
+class LLMProviderKind(StrEnum):
+    MOCK = "mock"
+    OPENAI_COMPATIBLE = "openai_compatible"
+
+
 class Settings(BaseSettings):
     app_name: str = "BiliSupport AI"
     app_version: str = "0.0.1"
@@ -32,6 +37,28 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8010
     log_level: LogLevel = LogLevel.INFO
+    llm_provider: LLMProviderKind = LLMProviderKind.MOCK
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: SecretStr | None = None
+    llm_model: str = "mock-support-model"
+    llm_mock_response: str = "这是来自确定性 Mock Provider 的客服回复。"
+    llm_max_retries: int = Field(default=2, ge=0, le=10)
+    llm_retry_base_delay: float = Field(default=0.1, ge=0)
+    llm_temperature: float = Field(default=0.0, ge=0, le=2)
+    llm_max_tokens: int = Field(default=512, gt=0)
+    llm_timeout_seconds: float = Field(default=30.0, gt=0)
+    database_url: str = "sqlite+aiosqlite:///./data/bili_support.db"
+    database_echo: bool = False
+    database_auto_create: bool = True
+    redis_enabled: bool = False
+    redis_required: bool = False
+    redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
+    redis_history_ttl_seconds: int = Field(default=900, gt=0, le=86400)
+    redis_history_max_messages: int = Field(default=100, gt=0, le=500)
+    api_token: SecretStr = SecretStr("local-demo-token")
+    ui_enabled: bool = True
+    ui_prefill_demo_credentials: bool = False
+    ui_storage_secret: SecretStr = SecretStr("local-ui-storage-secret-change-me")
 
     model_config = {
         "env_prefix": "BILI_SUPPORT_",
@@ -46,10 +73,29 @@ class Settings(BaseSettings):
             raise ValueError("port must be between 1 and 65535")
         return value
 
+    @field_validator("llm_base_url", "llm_model", "llm_mock_response", "database_url")
+    @classmethod
+    def llm_text_settings_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("LLM text settings must not be blank")
+        return value
+
     @model_validator(mode="after")
     def production_debug_prohibited(self, info: ValidationInfo) -> Settings:
         if self.environment == Environment.PRODUCTION and self.debug:
             raise ValueError("debug must be False in production environment")
+        if self.environment == Environment.PRODUCTION and self.database_auto_create:
+            raise ValueError("database_auto_create must be False in production")
+        if self.environment == Environment.PRODUCTION and self.ui_prefill_demo_credentials:
+            raise ValueError("ui_prefill_demo_credentials must be False in production")
+        if self.redis_required and not self.redis_enabled:
+            raise ValueError("redis_required needs redis_enabled=True")
+        if self.environment == Environment.PRODUCTION and (
+            self.api_token.get_secret_value() == "local-demo-token"
+            or self.ui_storage_secret.get_secret_value()
+            == "local-ui-storage-secret-change-me"
+        ):
+            raise ValueError("production secrets must be explicitly configured")
         return self
 
 

@@ -19,4 +19,4 @@ class ReadinessResponse(BaseModel):
     status: Literal["ready"] = "ready"
     service: str
     version: str
-    checks: dict[str, Literal["ready"]]
+    checks: dict[str, Literal["ready", "degraded"]]

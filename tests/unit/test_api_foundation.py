@@ -21,7 +21,11 @@ def test_ready_reports_initialized_configuration() -> None:
         "status": "ready",
         "service": "Test App",
         "version": "1.0.0",
-        "checks": {"configuration": "ready"},
+        "checks": {
+            "configuration": "ready",
+            "database": "ready",
+            "llm_provider": "ready",
+        },
     }
 
 

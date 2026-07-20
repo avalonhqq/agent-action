@@ -13,6 +13,9 @@ class ErrorCode(StrEnum):
     FORBIDDEN = "FORBIDDEN"
     RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND"
     CONFLICT = "CONFLICT"
+    MODEL_BAD_RESPONSE = "MODEL_BAD_RESPONSE"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    SERVICE_NOT_READY = "SERVICE_NOT_READY"
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
@@ -82,4 +85,26 @@ class ForbiddenError(AppError):
             message=message,
             status_code=403,
             details=details,
+        )
+
+
+class UnauthorizedError(AppError):
+    """Authentication credentials are missing or invalid."""
+
+    def __init__(self, message: str = "身份凭证无效或缺失") -> None:
+        super().__init__(
+            code=ErrorCode.UNAUTHORIZED,
+            message=message,
+            status_code=401,
+        )
+
+
+class ServiceNotReadyError(AppError):
+    """A mandatory dependency is not ready to serve traffic."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=ErrorCode.SERVICE_NOT_READY,
+            message="服务依赖尚未就绪",
+            status_code=503,
         )

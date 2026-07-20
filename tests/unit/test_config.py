@@ -8,7 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_core import ValidationError
 
-from bili_support.core.config import Environment, Settings, get_settings, reset_settings
+from bili_support.core.config import (
+    Environment,
+    LLMProviderKind,
+    Settings,
+    get_settings,
+    reset_settings,
+)
 from bili_support.main import create_app
 
 
@@ -36,6 +42,42 @@ def test_default_settings() -> None:
     assert settings.host == "127.0.0.1"
     assert settings.port == 8010
     assert settings.log_level.value == "INFO"
+    assert settings.llm_provider is LLMProviderKind.MOCK
+    assert settings.llm_temperature == 0.0
+
+
+def test_llm_environment_values_are_typed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BILI_SUPPORT_LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("BILI_SUPPORT_LLM_MAX_RETRIES", "3")
+    monkeypatch.setenv("BILI_SUPPORT_LLM_TEMPERATURE", "0.2")
+    reset_settings()
+
+    settings = get_settings()
+
+    assert settings.llm_provider is LLMProviderKind.OPENAI_COMPATIBLE
+    assert settings.llm_max_retries == 3
+    assert settings.llm_temperature == 0.2
+
+
+def test_redis_required_needs_redis_enabled() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, redis_required=True, redis_enabled=False)
+
+    assert "redis_required" in str(exc_info.value)
+
+
+def test_production_cannot_prefill_demo_credentials() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            _env_file=None,
+            environment="production",
+            database_auto_create=False,
+            api_token="production-api-token",
+            ui_storage_secret="production-storage-secret",
+            ui_prefill_demo_credentials=True,
+        )
+
+    assert "ui_prefill_demo_credentials" in str(exc_info.value)
 
 
 def test_port_string_converted_to_int(monkeypatch: pytest.MonkeyPatch) -> None:

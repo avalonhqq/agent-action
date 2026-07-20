@@ -1,5 +1,7 @@
 # BiliSupport AI 最终项目目标
 
+> 学习重心：学习者只聚焦 LLM、RAG、意图识别、Agent、安全与模型评估。Python 工程目标仍完整保留，但普通基础设施由 Codex 自动实现、测试和留档。
+
 ## 1. 产品定位
 
 构建一个全 Python 实现、可演示、可评估、可部署的仿哔哩哔哩企业多 Agent 智能客服网站。
@@ -48,7 +50,7 @@
 
 - FastAPI、Pydantic v2、SQLAlchemy 2.0、Alembic。
 - `asyncio`、异步 HTTP、SSE 和任务取消。
-- PostgreSQL；本地可使用兼容开发配置。
+- MySQL 8 事实存储、Redis 短期缓存；测试可使用 SQLite 兼容配置。
 - FAISS 起步，向量层可替换 Qdrant。
 - NiceGUI 构建聊天、知识管理和评估页面。
 - pytest、Ruff、mypy、pre-commit。

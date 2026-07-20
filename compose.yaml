@@ -1,4 +1,31 @@
 services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: bili_support
+      MYSQL_ROOT_PASSWORD: local-mysql-root-password
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-plocal-mysql-root-password"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -8,6 +35,23 @@ services:
       BILI_SUPPORT_HOST: 0.0.0.0
       BILI_SUPPORT_PORT: 8010
       BILI_SUPPORT_LOG_LEVEL: INFO
+      BILI_SUPPORT_DATABASE_URL: mysql+aiomysql://root:local-mysql-root-password@mysql:3306/bili_support?charset=utf8mb4
+      BILI_SUPPORT_DATABASE_AUTO_CREATE: "false"
+      BILI_SUPPORT_REDIS_ENABLED: "true"
+      BILI_SUPPORT_REDIS_REQUIRED: "true"
+      BILI_SUPPORT_REDIS_URL: redis://redis:6379/0
+      BILI_SUPPORT_API_TOKEN: local-demo-token
+      BILI_SUPPORT_UI_PREFILL_DEMO_CREDENTIALS: "true"
+      BILI_SUPPORT_UI_STORAGE_SECRET: local-compose-ui-secret
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8010:8010"
     restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:

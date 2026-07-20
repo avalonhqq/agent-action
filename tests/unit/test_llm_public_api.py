@@ -5,15 +5,33 @@ import bili_support.llm as llm
 
 def test_llm_package_exports_only_declared_public_names() -> None:
     assert llm.__all__ == [
+        "BoundedContextBuilder",
         "ChatMessage",
+        "ChatService",
         "FinishReason",
+        "InMemoryUsageRecorder",
         "LLMProvider",
         "LLMRequest",
+        "LLMResponseError",
         "LLMResponse",
+        "LLMUnavailableError",
         "MessageRole",
         "MockLLMProvider",
+        "OpenAICompatibleProvider",
+        "PromptRegistry",
+        "PromptTemplate",
+        "QueryRewriteResult",
+        "RewriteReason",
+        "StandaloneQueryRewriter",
         "StreamChunk",
+        "StructuredOutputError",
+        "StructuredOutputParser",
+        "StructuredOutputResult",
+        "StructuredOutputSpec",
         "TokenUsage",
+        "UsageRecord",
+        "UsageStatus",
+        "create_default_prompt_registry",
     ]
     assert all(hasattr(llm, name) for name in llm.__all__)
 

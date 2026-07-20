@@ -61,6 +61,16 @@ class TokenUsage(BaseModel):
         return self
 
 
+class StructuredOutputSpec(BaseModel):
+    """Provider-neutral JSON Schema request for structured model output."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    schema_definition: dict[str, object]
+    strict: bool = True
+
+
 class LLMRequest(BaseModel):
     """A validated, provider-neutral request for text generation."""
 
@@ -71,6 +81,7 @@ class LLMRequest(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_tokens: int = Field(default=512, gt=0)
     timeout_seconds: float = Field(default=30.0, gt=0.0)
+    structured_output: StructuredOutputSpec | None = None
 
     @field_validator("model")
     @classmethod
