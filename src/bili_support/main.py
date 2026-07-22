@@ -25,6 +25,8 @@ from bili_support.core.exceptions import ServiceNotReadyError
 from bili_support.core.logging import configure_logging
 from bili_support.core.request_context import RequestContextMiddleware
 from bili_support.core.security import create_auth_dependency
+from bili_support.intent.classifier import IntentClassifier
+from bili_support.intent.factory import build_intent_provider
 from bili_support.llm.context import BoundedContextBuilder, StandaloneQueryRewriter
 from bili_support.llm.factory import build_llm_provider
 from bili_support.llm.openai_compatible import OpenAICompatibleProvider
@@ -41,6 +43,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     llm_provider: LLMProvider | None = None,
+    intent_provider: LLMProvider | None = None,
     usage_recorder: UsageRecorder | None = None,
     database: Database | None = None,
     history_cache: ConversationHistoryCache | None = None,
@@ -49,6 +52,11 @@ def create_app(
     current_settings = settings or get_settings()
     configure_logging(current_settings.log_level)
     provider = llm_provider or build_llm_provider(current_settings)
+    current_intent_provider = intent_provider or build_intent_provider(
+        current_settings,
+        shared_provider=provider,
+    )
+    prompt_registry = create_default_prompt_registry()
     recorder = usage_recorder or InMemoryUsageRecorder()
     current_database = database or Database(
         current_settings.database_url,
@@ -67,7 +75,7 @@ def create_app(
     chat_service = ChatService(
         provider=provider,
         model=current_settings.llm_model,
-        prompt_registry=create_default_prompt_registry(),
+        prompt_registry=prompt_registry,
         usage_recorder=recorder,
         context_builder=BoundedContextBuilder(),
         rewriter=StandaloneQueryRewriter(),
@@ -80,6 +88,15 @@ def create_app(
         chat_service,
         history_cache=current_history_cache,
     )
+    intent_classifier = IntentClassifier(
+        provider=current_intent_provider,
+        prompt_registry=prompt_registry,
+        model=current_settings.llm_model,
+        temperature=current_settings.llm_temperature,
+        max_tokens=current_settings.llm_max_tokens,
+        timeout_seconds=current_settings.llm_timeout_seconds,
+        parse_retries=current_settings.intent_parse_retries,
+    )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
 
     @asynccontextmanager
@@ -91,6 +108,11 @@ def create_app(
         finally:
             if isinstance(provider, OpenAICompatibleProvider):
                 await provider.aclose()
+            if (
+                current_intent_provider is not provider
+                and isinstance(current_intent_provider, OpenAICompatibleProvider)
+            ):
+                await current_intent_provider.aclose()
             if redis_cache is not None:
                 await redis_cache.aclose()
             await current_database.dispose()
@@ -108,6 +130,7 @@ def create_app(
     application.state.usage_recorder = recorder
     application.state.database = current_database
     application.state.conversation_service = conversation_service
+    application.state.intent_classifier = intent_classifier
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -150,7 +173,10 @@ if _settings.ui_enabled:
     register_support_ui(
         app,
         service=app.state.conversation_service,
+        intent_classifier=app.state.intent_classifier,
         expected_token=_settings.api_token.get_secret_value(),
         storage_secret=_settings.ui_storage_secret.get_secret_value(),
         prefill_demo_credentials=_settings.ui_prefill_demo_credentials,
+        intent_provider_name=_settings.llm_provider.value,
+        intent_model=_settings.llm_model,
     )

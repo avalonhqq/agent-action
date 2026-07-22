@@ -10,3 +10,5 @@ def test_support_ui_is_mounted() -> None:
 
     assert response.status_code == 200
     assert "BiliSupport AI" in response.text
+    assert "识别意图" in response.text
+    assert "意图识别实验" in response.text

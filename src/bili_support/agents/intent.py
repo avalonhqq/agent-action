@@ -1,2 +1,1 @@
-"""Multi-label intent Agent skeleton; implemented during Week 8."""
-
+"""Intent Agent skeleton; the shared decision contract lives in bili_support.intent."""

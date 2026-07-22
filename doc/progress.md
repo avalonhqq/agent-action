@@ -7,7 +7,7 @@
 | 1   | Python AI 工程基础         | 已完成 | 2026-07-14 | 2026-07-17 | 23 项测试；配置、错误边界、Request ID、日志、探针、质量门禁和 Docker 基线    |
 | 2   | LLM、Prompt、结构化输出       | 已完成 | 2026-07-18 | 2026-07-19 | 96 项全量测试；Prompt 版本、结构化输出、兼容适配器、聊天/SSE、上下文改写和安全用量记录 |
 | 3   | Web 服务、会话、网站           | 已完成 | 2026-07-19 | 2026-07-20 | 106 项全量测试；MySQL/Redis、迁移、持久化会话、简单鉴权、SSE 和 NiceGUI  |
-| 4   | 意图识别与结构化决策             | 未开始 |            |            | 多标签意图、实体/风险、Few-shot 和分类评估                         |
+| 4   | 意图识别与结构化决策             | 进行中 | 2026-07-21 |            | Step 4A/4B 已完成；可通过 CLI 切换 Mock 或真实模型                 |
 | 5   | RAG 知识表示与 Chunk        | 未开始 |            |            | Loader 等自动完成；重点学习结构化分块与 Small-to-Big               |
 | 6   | Embedding 与向量检索        | 未开始 |            |            | 向量语义、过滤、Query Rewrite 和 Recall@K                   |
 | 7   | 混合检索、Rerank 与策略        | 未开始 |            |            | BM25、RRF、Reranker、策略和覆盖评估                          |
@@ -53,11 +53,22 @@
 
 | 类型 | 内容 | 状态 |
 |---|---|---|
-| AI 核心 | `IntentDecision`、多标签意图、实体、情绪、风险和澄清判断 | 待开始 |
+| AI 核心 | `IntentDecision`、多标签意图、实体、情绪、风险和澄清判断 | 已完成 |
 | AI 核心 | Zero-shot/Few-shot/混合基线及 Prompt v1/v2 | 待开始 |
 | AI 核心 | Macro-F1、混淆矩阵、误拒绝率和高风险漏判率 | 待开始 |
 | 自动底座 | 评估数据加载、批量 CLI、结果存储、API 和报告页 | 由 Codex 实现 |
 | 自动底座 | Mock Provider、Fixture、日志、错误处理和测试脚手架 | 由 Codex 实现 |
+
+### 第 4 周步骤
+
+| Step | 内容 | 状态 | 验收记录 |
+|---|---|---|---|
+| 4A | `IntentDecision`、枚举、实体与跨字段约束 | 已完成 | 18 项专项测试；全量 125 tests；Ruff、mypy 通过 |
+| 4B | `intent_classification:v1` Zero-shot Prompt | 已完成 | Prompt、严格 Schema、分类器、Mock/真实 Provider、页面与 CLI |
+| 4C | Few-shot 与规则/模型混合分类器 | 待开始 | |
+| 4D | 固定评估集、指标与批量运行底座 | 待开始 | |
+| 4E | 失败样本分析与 Prompt v2 | 待开始 | |
+| 4F | 接入客服路由、复盘与质量门禁 | 待开始 | |
 
 ## 每周复盘模板
 

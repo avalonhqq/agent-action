@@ -43,20 +43,20 @@ Codex 自动补齐工程前置
 
 ## 3. 12 周重新安排
 
-| 周 | 学习主题 | 你的大模型重点 | 自动完成的基础配套 | 状态 |
-|---|---|---|---|---|
-| 1 | Python AI 工程基线 | 理解类型、安全边界和异步调用 | 工程、配置、日志、探针、Docker | 已完成 |
-| 2 | LLM 调用与 Prompt | Provider、Prompt、结构化输出、SSE、上下文 | HTTP 适配、错误映射、配置接线 | 已完成 |
-| 3 | 持久化对话与记忆底座 | 理解消息历史如何进入模型上下文 | 数据库、迁移、鉴权、会话 API、NiceGUI | 已完成 |
-| 4 | 意图识别与结构化决策 | 多标签意图、实体、风险、置信度、Few-shot、评估 | 数据集读写、评估 CLI/API、报告页面 | 下一阶段 |
-| 5 | RAG 知识表示与 Chunk | 结构恢复、Small-to-Big、表格语义、元数据 | PDF/DOCX/MD/TXT Loader、任务表、上传和重试接口 | 未开始 |
-| 6 | Embedding 与向量检索 | 向量语义、相似度、Top-K、Query Rewrite、过滤 | FAISS 持久化、索引版本、调试接口 | 未开始 |
-| 7 | 混合检索、Rerank 与策略 | BM25、RRF、Reranker、RetrievalPolicy、多实体覆盖 | FAQ CRUD、领域词典管理、评估报表 | 未开始 |
-| 8 | 证据约束生成与 RAG 评估 | Grounded Prompt、引用、拒答、Faithfulness、Answer Relevancy | 引用接口、Golden Dataset 管理、批量运行器 | 未开始 |
-| 9 | LangGraph 状态化工作流 | State、Node、Edge、Checkpoint、循环保护和恢复 | Checkpoint 存储、流程调试页和持久化接线 | 未开始 |
-| 10 | 多 Agent 与 Tool Calling | Supervisor、任务拆解、并发聚合、工具选择和确认 | Mock 业务服务、权限表、审计表和管理接口 | 未开始 |
-| 11 | 校验、安全与模型观测 | Verification、注入防护、PII、降级、模型指标和回归 | OpenTelemetry、限流、告警、压测和运维页面 | 未开始 |
-| 12 | 效果优化与最终交付 | 端到端误差分析、策略调优、模型选型和面试表达 | Demo 包装、部署脚本、运行手册和展示页面 | 未开始 |
+| 周   | 学习主题                   | 你的大模型重点                                             | 自动完成的基础配套                          | 状态   |
+| --- | ---------------------- | --------------------------------------------------- | ---------------------------------- | ---- |
+| 1   | Python AI 工程基线         | 理解类型、安全边界和异步调用                                      | 工程、配置、日志、探针、Docker                 | 已完成  |
+| 2   | LLM 调用与 Prompt         | Provider、Prompt、结构化输出、SSE、上下文                       | HTTP 适配、错误映射、配置接线                  | 已完成  |
+| 3   | 持久化对话与记忆底座             | 理解消息历史如何进入模型上下文                                     | 数据库、迁移、鉴权、会话 API、NiceGUI           | 已完成  |
+| 4   | 意图识别与结构化决策             | 多标签意图、实体、风险、置信度、Few-shot、评估                         | 数据集读写、评估 CLI/API、报告页面              | 下一阶段 |
+| 5   | RAG 知识表示与 Chunk        | 结构恢复、Small-to-Big、表格语义、元数据                          | PDF/DOCX/MD/TXT Loader、任务表、上传和重试接口 | 未开始  |
+| 6   | Embedding 与向量检索        | 向量语义、相似度、Top-K、Query Rewrite、过滤                     | FAISS 持久化、索引版本、调试接口                | 未开始  |
+| 7   | 混合检索、Rerank 与策略        | BM25、RRF、Reranker、RetrievalPolicy、多实体覆盖             | FAQ CRUD、领域词典管理、评估报表               | 未开始  |
+| 8   | 证据约束生成与 RAG 评估         | Grounded Prompt、引用、拒答、Faithfulness、Answer Relevancy | 引用接口、Golden Dataset 管理、批量运行器       | 未开始  |
+| 9   | LangGraph 状态化工作流       | State、Node、Edge、Checkpoint、循环保护和恢复                  | Checkpoint 存储、流程调试页和持久化接线          | 未开始  |
+| 10  | 多 Agent 与 Tool Calling | Supervisor、任务拆解、并发聚合、工具选择和确认                        | Mock 业务服务、权限表、审计表和管理接口             | 未开始  |
+| 11  | 校验、安全与模型观测             | Verification、注入防护、PII、降级、模型指标和回归                    | OpenTelemetry、限流、告警、压测和运维页面        | 未开始  |
+| 12  | 效果优化与最终交付              | 端到端误差分析、策略调优、模型选型和面试表达                              | Demo 包装、部署脚本、运行手册和展示页面             | 未开始  |
 
 ## 4. 第 1～3 周：已完成前置
 

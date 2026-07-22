@@ -7,6 +7,7 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
+from bili_support.core.config import LLMStructuredOutputMode
 from bili_support.llm.errors import LLMResponseError, LLMUnavailableError
 from bili_support.llm.openai_compatible import OpenAICompatibleProvider
 from bili_support.llm.structured import StructuredOutputParser
@@ -94,6 +95,31 @@ async def test_complete_maps_provider_neutral_json_schema_request() -> None:
     )
     base_request = _request()
     request = base_request.model_copy(
+        update={
+            "structured_output": StructuredOutputParser(_StructuredAnswer).specification(
+                "support_answer"
+            )
+        }
+    )
+
+    await provider.complete(request)
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_complete_can_map_structured_request_to_json_object_mode() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["response_format"] == {"type": "json_object"}
+        return httpx.Response(200, json=_completion_response())
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider(
+        base_url="https://api.deepseek.com",
+        structured_output_mode=LLMStructuredOutputMode.JSON_OBJECT,
+        client=client,
+    )
+    request = _request().model_copy(
         update={
             "structured_output": StructuredOutputParser(_StructuredAnswer).specification(
                 "support_answer"

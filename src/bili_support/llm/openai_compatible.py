@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from bili_support.core.config import LLMStructuredOutputMode
 from bili_support.llm.errors import LLMResponseError, LLMUnavailableError
 from bili_support.llm.types import (
     FinishReason,
@@ -81,6 +82,9 @@ class OpenAICompatibleProvider:
         *,
         base_url: str,
         api_key: str | None = None,
+        structured_output_mode: LLMStructuredOutputMode = (
+            LLMStructuredOutputMode.JSON_SCHEMA
+        ),
         max_retries: int = 2,
         retry_base_delay: float = 0.1,
         client: httpx.AsyncClient | None = None,
@@ -96,6 +100,7 @@ class OpenAICompatibleProvider:
         self._base_url = base_url.rstrip("/")
         self._max_retries = max_retries
         self._retry_base_delay = retry_base_delay
+        self._structured_output_mode = structured_output_mode
         self._sleep = sleep
         self._headers = {"Content-Type": "application/json"}
         if api_key:
@@ -180,14 +185,17 @@ class OpenAICompatibleProvider:
         if stream:
             payload["stream_options"] = {"include_usage": True}
         if request.structured_output is not None:
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": request.structured_output.name,
-                    "strict": request.structured_output.strict,
-                    "schema": request.structured_output.schema_definition,
-                },
-            }
+            if self._structured_output_mode is LLMStructuredOutputMode.JSON_OBJECT:
+                payload["response_format"] = {"type": "json_object"}
+            else:
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": request.structured_output.name,
+                        "strict": request.structured_output.strict,
+                        "schema": request.structured_output.schema_definition,
+                    },
+                }
         return payload
 
     @staticmethod

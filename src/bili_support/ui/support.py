@@ -7,6 +7,8 @@ from nicegui import ui
 
 from bili_support.core.exceptions import AppError
 from bili_support.core.security import UserContext, authenticate_user
+from bili_support.intent.classifier import IntentClassifier
+from bili_support.intent.types import IntentDecision
 from bili_support.services.conversations import ConversationService
 
 
@@ -14,9 +16,12 @@ def register_support_ui(
     fastapi_app: FastAPI,
     *,
     service: ConversationService,
+    intent_classifier: IntentClassifier,
     expected_token: str,
     storage_secret: str,
     prefill_demo_credentials: bool = False,
+    intent_provider_name: str = "mock",
+    intent_model: str = "mock-support-model",
 ) -> None:
     """Mount the learning UI on an existing FastAPI application."""
 
@@ -51,6 +56,22 @@ def register_support_ui(
                 with ui.row():
                     create_button = ui.button("新建会话")
                     send_button = ui.button("发送并流式回答")
+                    intent_button = ui.button("识别意图", color="secondary")
+                with ui.card().classes("w-full"):
+                    with ui.row().classes("items-center justify-between w-full"):
+                        ui.label("意图识别实验").classes("text-h6")
+                        ui.label(
+                            f"Provider: {intent_provider_name} · Model: {intent_model}"
+                        ).classes("text-caption text-grey")
+                    if intent_provider_name == "mock":
+                        ui.label(
+                            "当前为确定性 Mock，仅验证页面和 Schema 链路，不代表真实分类效果。"
+                        ).classes("text-caption text-orange")
+                    intent_result = ui.column().classes("w-full gap-2")
+                    with intent_result:
+                        ui.label("输入问题后点击“识别意图”查看结构化决策。").classes(
+                            "text-grey"
+                        )
 
         def actor() -> UserContext:
             return authenticate_user(
@@ -103,8 +124,69 @@ def register_support_ui(
             except AppError as exc:
                 answer.set_content(f"请求失败：{exc.message}")
 
+        def render_intent(decision: IntentDecision) -> None:
+            intent_result.clear()
+            with intent_result:
+                with ui.row().classes("items-center gap-2"):
+                    ui.badge(f"路由：{decision.route.value}", color="primary")
+                    ui.badge(f"风险：{decision.risk.value}", color="secondary")
+                    ui.label(f"置信度：{decision.confidence:.2f}")
+                ui.label(
+                    f"情绪：{decision.sentiment.value} · 来源：{decision.source.value}"
+                ).classes("text-caption")
+                if decision.intents:
+                    ui.label("子意图").classes("text-subtitle2")
+                    with ui.row().classes("gap-2"):
+                        for item in decision.intents:
+                            ui.chip(
+                                f"{item.domain.value} + {item.action.value} "
+                                f"({item.confidence:.2f})"
+                            )
+                if decision.entities:
+                    ui.label("实体").classes("text-subtitle2")
+                    for entity in decision.entities:
+                        normalized = (
+                            f" → {entity.normalized_value}"
+                            if entity.normalized_value is not None
+                            else ""
+                        )
+                        ui.label(
+                            f"{entity.type.value}: {entity.raw_value}{normalized}"
+                        ).classes("text-body2")
+                if decision.needs_clarification:
+                    ui.label(
+                        f"需要澄清：{decision.clarification_question}"
+                    ).classes("text-orange")
+
+        async def classify_intent() -> None:
+            content = (question.value or "").strip()
+            if not content:
+                ui.notify("请输入问题", type="warning")
+                return
+            try:
+                actor()
+                result = await intent_classifier.classify(content)
+            except AppError as exc:
+                ui.notify(exc.message, type="negative")
+                return
+            except ValueError:
+                ui.notify("问题不能为空且不能超过 4000 个字符", type="warning")
+                return
+            if result.value is None:
+                error_code = result.error_code
+                message = error_code.value if error_code is not None else "unknown"
+                intent_result.clear()
+                with intent_result:
+                    ui.label(f"模型输出未通过意图校验：{message}").classes(
+                        "text-negative"
+                    )
+                return
+            render_intent(result.value)
+            ui.notify("意图识别完成", type="positive")
+
         create_button.on_click(create_conversation)
         send_button.on_click(send)
+        intent_button.on_click(classify_intent)
         question.on("keydown.enter", send)
 
     ui.run_with(

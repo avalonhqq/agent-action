@@ -17,6 +17,7 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
     return OpenAICompatibleProvider(
         base_url=settings.llm_base_url,
         api_key=api_key,
+        structured_output_mode=settings.llm_structured_output_mode,
         max_retries=settings.llm_max_retries,
         retry_base_delay=settings.llm_retry_base_delay,
     )

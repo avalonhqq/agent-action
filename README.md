@@ -320,6 +320,61 @@ BILI_SUPPORT_LLM_API_KEY=<你的本地密钥>
 
 兼容服务必须实现 Chat Completions 风格的 `/chat/completions` 普通和 SSE 响应。默认 Mock 是学习、测试和离线演示的推荐方式。
 
+### 意图识别实验
+
+主要交互入口是客服页面：
+
+```text
+http://127.0.0.1:8010/support/
+```
+
+在“请输入客服问题”中输入内容，点击“识别意图”，页面会展示顶层路由、子意图、实体、情绪、
+风险、置信度、来源和澄清问题。意图识别不会创建会话或写入消息；需要正式客服回答时再点击
+“发送并流式回答”。
+
+不配置真实模型时，页面使用确定性 Mock 验证 Prompt、JSON Schema、解析和展示链路，并明确
+标注 Mock 不代表真实分类效果。
+
+命令行只保留为开发调试入口：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.intent.cli "怎么取消大会员？"
+```
+
+切换真实模型时，在本地 `.env` 填写以下配置，不要提交真实 Key：
+
+```dotenv
+BILI_SUPPORT_LLM_PROVIDER=openai_compatible
+BILI_SUPPORT_LLM_BASE_URL=https://你的兼容服务地址/v1
+BILI_SUPPORT_LLM_MODEL=你的模型名
+BILI_SUPPORT_LLM_API_KEY=你的本地密钥
+BILI_SUPPORT_LLM_TEMPERATURE=0.0
+BILI_SUPPORT_LLM_STRUCTURED_OUTPUT_MODE=json_schema
+```
+
+重启服务并刷新 `/support/` 后，页面会显示 `Provider: openai_compatible` 和配置的模型名。
+也可以使用同一条调试命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.intent.cli "我的账号被盗了，怎么找回？"
+```
+
+CLI 只输出通过 `IntentDecision` 校验的 JSON；非法 JSON、Schema 失败和 Provider
+错误会返回稳定错误码。当前适配器会在 Base URL 后追加 `/chat/completions`，并要求兼容服务支持
+OpenAI 风格的严格 `response_format=json_schema`。如果目标服务只支持 `json_object` 或纯文本 JSON，
+需要在明确供应商后增加对应能力配置，不能假设其完全兼容。
+
+DeepSeek 使用：
+
+```dotenv
+BILI_SUPPORT_LLM_BASE_URL=https://api.deepseek.com
+BILI_SUPPORT_LLM_MODEL=deepseek-v4-flash
+BILI_SUPPORT_LLM_STRUCTURED_OUTPUT_MODE=json_object
+```
+
+`json_object` 只保证返回合法 JSON，最终字段和跨字段关系仍由 `IntentDecision` Pydantic Schema
+严格校验；校验失败不会进入路由或工具执行。
+
 所有 HTTP 响应均带有 `X-Request-ID`。合法的调用方 Request ID 会被透传，缺失或非法时由服务生成。
 
 业务错误采用稳定结构，内部异常和被拒绝的原始输入不会返回给客户端：

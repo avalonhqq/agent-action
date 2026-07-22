@@ -32,6 +32,9 @@ dev = [
   "ruff>=0.14,<1.0",
 ]
 
+[project.scripts]
+bili-intent = "bili_support.intent.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/bili_support"]
 

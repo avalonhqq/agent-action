@@ -11,6 +11,7 @@ from pydantic_core import ValidationError
 from bili_support.core.config import (
     Environment,
     LLMProviderKind,
+    LLMStructuredOutputMode,
     Settings,
     get_settings,
     reset_settings,
@@ -50,6 +51,7 @@ def test_llm_environment_values_are_typed(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("BILI_SUPPORT_LLM_PROVIDER", "openai_compatible")
     monkeypatch.setenv("BILI_SUPPORT_LLM_MAX_RETRIES", "3")
     monkeypatch.setenv("BILI_SUPPORT_LLM_TEMPERATURE", "0.2")
+    monkeypatch.setenv("BILI_SUPPORT_LLM_STRUCTURED_OUTPUT_MODE", "json_object")
     reset_settings()
 
     settings = get_settings()
@@ -57,6 +59,7 @@ def test_llm_environment_values_are_typed(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.llm_provider is LLMProviderKind.OPENAI_COMPATIBLE
     assert settings.llm_max_retries == 3
     assert settings.llm_temperature == 0.2
+    assert settings.llm_structured_output_mode is LLMStructuredOutputMode.JSON_OBJECT
 
 
 def test_redis_required_needs_redis_enabled() -> None:

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "doc/course-realignment-2026-07-20.md",
+                "file": "doc/week4-step4a-intent-schema.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "course-realignment-2026-07-20"
+              "title": "week4-step4a-intent-schema"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "doc/course-realignment-2026-07-20.md",
+                "file": "doc/week4-step4a-intent-schema.md",
                 "collapseAll": true,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "course-realignment-2026-07-20 的反向链接列表"
+              "title": "week4-step4a-intent-schema 的反向链接列表"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "doc/course-realignment-2026-07-20.md",
+                "file": "doc/week4-step4a-intent-schema.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "course-realignment-2026-07-20 的出链列表"
+              "title": "week4-step4a-intent-schema 的出链列表"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "doc/course-realignment-2026-07-20.md",
+                "file": "doc/week4-step4a-intent-schema.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "course-realignment-2026-07-20 的大纲"
+              "title": "week4-step4a-intent-schema 的大纲"
             }
           }
         ],
@@ -185,6 +185,14 @@
   },
   "active": "37482633da09ca50",
   "lastOpenFiles": [
+    "src/bili_support/intent/__init__.py",
+    "src/bili_support/intent/types.py",
+    "src/bili_support/intent",
+    "doc/current-step.md",
+    "doc/learning-plan.md",
+    "doc/week4-step4a-intent-schema.md",
+    "doc/collaboration-guide.md",
+    "doc/course-realignment-2026-07-20.md",
     "doc/final-deliverables.md",
     "doc/implementation-goals.md",
     "doc/week1-completion.md",
@@ -194,11 +202,7 @@
     "doc/progress.md",
     "doc/product-flow.md",
     "doc/mysql-redis-setup.md",
-    "doc/learning-plan.md",
     "doc/architecture.md",
-    "doc/collaboration-guide.md",
-    "doc/course-realignment-2026-07-20.md",
-    "doc/current-step.md",
     "doc/week3-completion.md",
     "doc/week2-step2a-completion.md",
     "doc/week2-completion.md",
@@ -210,8 +214,6 @@
     "data/bili_support.db",
     "tests/unit/__pycache__/test_support_ui.cpython-313-pytest-9.1.1.pyc",
     "tests/unit/test_support_ui.py",
-    "data/debug2.db-journal",
-    "data/debug2.db",
     "README.md",
     "doc/decisions.md",
     "customer/doc/current-step.md",

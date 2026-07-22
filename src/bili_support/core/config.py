@@ -29,6 +29,21 @@ class LLMProviderKind(StrEnum):
     OPENAI_COMPATIBLE = "openai_compatible"
 
 
+class LLMStructuredOutputMode(StrEnum):
+    """Wire-level structured-output capability of the configured provider."""
+
+    JSON_SCHEMA = "json_schema"
+    JSON_OBJECT = "json_object"
+
+
+_DEFAULT_INTENT_MOCK_RESPONSE = (
+    '{"route":"supported","intents":[{"domain":"membership",'
+    '"action":"query","confidence":0.9}],"entities":[],"sentiment":"neutral",'
+    '"risk":"low","confidence":0.9,"needs_clarification":false,'
+    '"clarification_question":null,"source":"model"}'
+)
+
+
 class Settings(BaseSettings):
     app_name: str = "BiliSupport AI"
     app_version: str = "0.0.1"
@@ -41,7 +56,12 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: SecretStr | None = None
     llm_model: str = "mock-support-model"
+    llm_structured_output_mode: LLMStructuredOutputMode = (
+        LLMStructuredOutputMode.JSON_SCHEMA
+    )
     llm_mock_response: str = "这是来自确定性 Mock Provider 的客服回复。"
+    intent_mock_response: str = _DEFAULT_INTENT_MOCK_RESPONSE
+    intent_parse_retries: int = Field(default=1, ge=0, le=3)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
     llm_retry_base_delay: float = Field(default=0.1, ge=0)
     llm_temperature: float = Field(default=0.0, ge=0, le=2)
@@ -73,7 +93,13 @@ class Settings(BaseSettings):
             raise ValueError("port must be between 1 and 65535")
         return value
 
-    @field_validator("llm_base_url", "llm_model", "llm_mock_response", "database_url")
+    @field_validator(
+        "llm_base_url",
+        "llm_model",
+        "llm_mock_response",
+        "intent_mock_response",
+        "database_url",
+    )
     @classmethod
     def llm_text_settings_must_not_be_blank(cls, value: str) -> str:
         if not value.strip():
