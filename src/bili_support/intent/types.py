@@ -1,4 +1,4 @@
-"""Stable domain contracts for intent classification and downstream routing."""
+"""意图识别及下游路由共享的稳定领域契约。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class IntentRoute(StrEnum):
-    """Top-level decision made before retrieval, tools, or specialist routing."""
+    """进入检索、工具或专业 Agent 前必须先完成的顶层路由。"""
 
     SUPPORTED = "supported"
     OUT_OF_DOMAIN = "out_of_domain"
@@ -18,7 +18,7 @@ class IntentRoute(StrEnum):
 
 
 class BusinessDomain(StrEnum):
-    """Stable Bilibili customer-service business domains."""
+    """哔哩哔哩客服使用的稳定业务域。"""
 
     MEMBERSHIP = "membership"
     ORDER = "order"
@@ -31,7 +31,7 @@ class BusinessDomain(StrEnum):
 
 
 class IntentAction(StrEnum):
-    """Actions that can be combined with a business domain."""
+    """可与业务域组合的动作，避免为每个组合创建膨胀的枚举。"""
 
     QUERY = "query"
     CANCEL = "cancel"
@@ -45,7 +45,7 @@ class IntentAction(StrEnum):
 
 
 class EntityType(StrEnum):
-    """Entity categories; entity values intentionally remain open text."""
+    """实体类型受枚举约束，但实体值有意保留为开放文本。"""
 
     PRODUCT = "product"
     ORDER_ID = "order_id"
@@ -61,7 +61,7 @@ class EntityType(StrEnum):
 
 
 class Sentiment(StrEnum):
-    """Coarse sentiment used for response tone and escalation policy."""
+    """用于回复语气和升级策略的粗粒度情绪。"""
 
     NEUTRAL = "neutral"
     POSITIVE = "positive"
@@ -71,7 +71,7 @@ class Sentiment(StrEnum):
 
 
 class RiskLevel(StrEnum):
-    """Business and safety risk declared by the classifier."""
+    """分类器声明的业务及安全风险等级。"""
 
     LOW = "low"
     MEDIUM = "medium"
@@ -80,7 +80,7 @@ class RiskLevel(StrEnum):
 
 
 class DecisionSource(StrEnum):
-    """Classifier source retained for comparison and audit."""
+    """保留决策来源，便于比较规则、模型与混合策略并进行审计。"""
 
     RULE = "rule"
     MODEL = "model"
@@ -88,8 +88,9 @@ class DecisionSource(StrEnum):
 
 
 class IntentEntity(BaseModel):
-    """An extracted entity with both source text and optional normalized text."""
+    """抽取实体：同时保存用户原文和可选的规范化值。"""
 
+    # 冻结对象防止路由过程中被原地修改；拒绝未知字段防止模型悄悄扩展协议。
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     type: EntityType
@@ -116,7 +117,7 @@ class IntentEntity(BaseModel):
 
 
 class SubIntent(BaseModel):
-    """One independently routable intent in a potentially compound request."""
+    """复合问题中一个可以独立路由的“业务域 + 动作”。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -126,11 +127,12 @@ class SubIntent(BaseModel):
 
 
 class IntentDecision(BaseModel):
-    """Validated classifier result shared by RAG, tools, agents, and evaluation."""
+    """经校验后供 RAG、工具、Agent 和评估共同使用的决策。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     route: IntentRoute
+    # 使用 tuple 才能真正保持集合不可变；frozen=True 不会递归冻结 list。
     intents: tuple[SubIntent, ...] = ()
     entities: tuple[IntentEntity, ...] = ()
     sentiment: Sentiment = Sentiment.NEUTRAL
@@ -143,7 +145,7 @@ class IntentDecision(BaseModel):
     @field_validator("clarification_question")
     @classmethod
     def clarification_question_must_not_be_blank(
-        cls, value: str | None
+            cls, value: str | None
     ) -> str | None:
         if value is None:
             return None
@@ -154,6 +156,7 @@ class IntentDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision(self) -> Self:
+        # 顶层路由是业务闸门：只有 supported 才允许进入具体业务处理。
         if self.route is IntentRoute.SUPPORTED and not self.intents:
             raise ValueError("supported route requires at least one sub-intent")
         if self.route is not IntentRoute.SUPPORTED and self.intents:
@@ -161,12 +164,14 @@ class IntentDecision(BaseModel):
         if self.route is IntentRoute.UNSAFE and self.risk is RiskLevel.LOW:
             raise ValueError("unsafe route cannot have low risk")
 
+        # 布尔标记与问题文本必须成对出现，避免页面或 Agent 猜测是否要追问。
         has_question = self.clarification_question is not None
         if self.needs_clarification != has_question:
             raise ValueError(
                 "clarification_question must be present exactly when clarification is needed"
             )
 
+        # 同一业务域和动作只保留一次，置信度差异不能制造重复任务。
         intent_keys = {(intent.domain, intent.action) for intent in self.intents}
         if len(intent_keys) != len(self.intents):
             raise ValueError("duplicate domain and action sub-intents are not allowed")

@@ -125,6 +125,7 @@ def _render_template(template: str, variables: Mapping[str, str]) -> str:
 
 
 def _create_intent_classification_prompt() -> PromptTemplate:
+    """创建 Zero-shot v1；这里只给规则，不加入输入—答案示例。"""
     return PromptTemplate(
         name="intent_classification",
         version=1,
@@ -167,5 +168,6 @@ def _create_intent_classification_prompt() -> PromptTemplate:
             "不要输出 Markdown、解释、建议、思维链或契约外字段；"
             "只生成符合结构化输出契约的最终结果。"
         ),
+        # 标签仅帮助模型区分数据和指令，真正的权限边界仍由消息角色保证。
         user_template="<user_query>\n{question}\n</user_query>",
     )

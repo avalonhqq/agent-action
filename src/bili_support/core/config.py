@@ -30,7 +30,7 @@ class LLMProviderKind(StrEnum):
 
 
 class LLMStructuredOutputMode(StrEnum):
-    """Wire-level structured-output capability of the configured provider."""
+    """供应商在线路协议层支持的结构化输出能力。"""
 
     JSON_SCHEMA = "json_schema"
     JSON_OBJECT = "json_object"
@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     )
     llm_mock_response: str = "这是来自确定性 Mock Provider 的客服回复。"
     intent_mock_response: str = _DEFAULT_INTENT_MOCK_RESPONSE
+    # 结构重试与 HTTP 重试分开计数，防止格式错误导致无限付费调用。
     intent_parse_retries: int = Field(default=1, ge=0, le=3)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
     llm_retry_base_delay: float = Field(default=0.1, ge=0)

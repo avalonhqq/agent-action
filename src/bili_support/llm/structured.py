@@ -1,4 +1,4 @@
-"""Pydantic structured-output parsing with explicit safe degradation."""
+"""使用 Pydantic 解析结构化输出，并显式、安全地降级。"""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from bili_support.llm.types import StructuredOutputSpec
 
 
 class StructuredOutputError(StrEnum):
-    """Stable reason codes for structured-output parsing failures."""
+    """结构化输出解析失败时对外稳定的原因码。"""
 
     INVALID_JSON = "invalid_json"
     SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
 
 
 class StructuredOutputResult[T: BaseModel](BaseModel):
-    """A parsed value or a safe reason code, never raw model reasoning."""
+    """只包含解析值或安全错误码，绝不携带模型原始推理。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -33,24 +33,26 @@ class StructuredOutputResult[T: BaseModel](BaseModel):
 
 
 class StructuredOutputParser[T: BaseModel]:
-    """Parse strict JSON into a caller-supplied Pydantic schema."""
+    """把严格 JSON 解析为调用方指定的 Pydantic 类型。"""
 
     def __init__(self, schema: type[T]) -> None:
         self._schema = schema
 
     def specification(self, name: str) -> StructuredOutputSpec:
-        """Build the provider-neutral JSON Schema request for this parser."""
+        """从同一个 Pydantic 类型生成供应商无关的 JSON Schema 请求。"""
         return StructuredOutputSpec(
             name=name,
             schema_definition=self._schema.model_json_schema(),
         )
 
     def parse(self, content: str) -> StructuredOutputResult[T]:
+        # 第一层只判断语法；合法 JSON 不代表字段和业务组合合法。
         try:
             payload = json.loads(content)
         except json.JSONDecodeError:
             return StructuredOutputResult[T](error_code=StructuredOutputError.INVALID_JSON)
 
+        # 第二层执行字段、枚举、范围和 IntentDecision 跨字段校验。
         try:
             value = self._schema.model_validate(payload)
         except ValidationError:

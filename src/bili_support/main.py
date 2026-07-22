@@ -1,7 +1,4 @@
-"""Application entry point.
-
-Configuration is loaded from bili_support.core.config.
-"""
+"""应用入口：从配置装配数据库、模型、意图分类器、API 与页面。"""
 
 from __future__ import annotations
 
@@ -40,22 +37,24 @@ from bili_support.ui import register_support_ui
 
 
 def create_app(
-    settings: Settings | None = None,
-    *,
-    llm_provider: LLMProvider | None = None,
-    intent_provider: LLMProvider | None = None,
-    usage_recorder: UsageRecorder | None = None,
-    database: Database | None = None,
-    history_cache: ConversationHistoryCache | None = None,
+        settings: Settings | None = None,
+        *,
+        llm_provider: LLMProvider | None = None,
+        intent_provider: LLMProvider | None = None,
+        usage_recorder: UsageRecorder | None = None,
+        database: Database | None = None,
+        history_cache: ConversationHistoryCache | None = None,
 ) -> FastAPI:
-    """Create an application using an explicitly supplied or cached configuration."""
+    """使用显式注入或缓存配置创建完整 FastAPI 应用。"""
     current_settings = settings or get_settings()
     configure_logging(current_settings.log_level)
+    # 普通客服回答和意图识别在真实环境可共享 Provider；测试仍可分别注入。
     provider = llm_provider or build_llm_provider(current_settings)
     current_intent_provider = intent_provider or build_intent_provider(
         current_settings,
         shared_provider=provider,
     )
+    # 同一 Registry 保证回答与意图 Prompt 的版本解析方式一致。
     prompt_registry = create_default_prompt_registry()
     recorder = usage_recorder or InMemoryUsageRecorder()
     current_database = database or Database(
@@ -72,6 +71,7 @@ def create_app(
         else None
     )
     current_history_cache = history_cache or redis_cache
+    # ChatService 负责生成客服答案；它与下面的 IntentClassifier 职责独立。
     chat_service = ChatService(
         provider=provider,
         model=current_settings.llm_model,
@@ -88,6 +88,7 @@ def create_app(
         chat_service,
         history_cache=current_history_cache,
     )
+    # 分类器只生成结构化决策，不保存会话，也不执行任何业务工具。
     intent_classifier = IntentClassifier(
         provider=current_intent_provider,
         prompt_registry=prompt_registry,
@@ -101,16 +102,18 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        """管理数据库、Redis 和模型客户端的应用级生命周期。"""
         if current_settings.database_auto_create:
             await current_database.create_schema()
         try:
             yield
         finally:
+            # 共享 Provider 只关闭一次；独立意图 Provider 才需要额外关闭。
             if isinstance(provider, OpenAICompatibleProvider):
                 await provider.aclose()
             if (
-                current_intent_provider is not provider
-                and isinstance(current_intent_provider, OpenAICompatibleProvider)
+                    current_intent_provider is not provider
+                    and isinstance(current_intent_provider, OpenAICompatibleProvider)
             ):
                 await current_intent_provider.aclose()
             if redis_cache is not None:
@@ -127,6 +130,7 @@ def create_app(
     application.include_router(
         create_api_router(chat_service, conversation_service, authenticate)
     )
+    # 页面和后续路由从 app.state 获取已装配实例，不在请求中重复创建客户端。
     application.state.usage_recorder = recorder
     application.state.database = current_database
     application.state.conversation_service = conversation_service
@@ -170,6 +174,7 @@ def create_app(
 _settings = get_settings()
 app = create_app(_settings)
 if _settings.ui_enabled:
+    # UI 只是调用已经装配好的服务，不直接读取 Key 或构造 Provider。
     register_support_ui(
         app,
         service=app.state.conversation_service,

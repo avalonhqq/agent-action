@@ -1,4 +1,4 @@
-"""Minimal async adapter for the OpenAI Chat Completions-compatible contract."""
+"""OpenAI Chat Completions 兼容协议的最小异步适配器。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from bili_support.llm.types import (
     TokenUsage,
 )
 
+# 只重试明确的临时错误；400 等配置/协议错误必须立即暴露，避免无意义扣费。
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
@@ -75,7 +76,7 @@ class _StreamEnvelope(BaseModel):
 
 
 class OpenAICompatibleProvider:
-    """Map the compatible HTTP wire format to internal LLM contracts."""
+    """在外部 HTTP 协议与内部 LLM 契约之间做双向映射。"""
 
     def __init__(
         self,
@@ -104,11 +105,13 @@ class OpenAICompatibleProvider:
         self._sleep = sleep
         self._headers = {"Content-Type": "application/json"}
         if api_key:
+            # Key 只进入请求头，不写入 LLMRequest、Prompt、日志或异常消息。
             self._headers["Authorization"] = f"Bearer {api_key}"
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient()
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        """执行普通补全；仅对网络错误和临时状态码进行有限重试。"""
         payload = self._payload(request, stream=False)
         for attempt in range(self._max_retries + 1):
             try:
@@ -127,6 +130,7 @@ class OpenAICompatibleProvider:
         raise AssertionError("retry loop must return or raise")
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[StreamChunk]:
+        """映射 SSE 流；一旦已经输出内容，失败后不再从头重试以免文本重复。"""
         payload = self._payload(request, stream=True)
         emitted = False
         for attempt in range(self._max_retries + 1):
@@ -167,11 +171,12 @@ class OpenAICompatibleProvider:
         raise AssertionError("retry loop must return or raise")
 
     async def aclose(self) -> None:
-        """Close only a client created and owned by this adapter."""
+        """只关闭由本适配器创建并拥有的 HTTP 客户端。"""
         if self._owns_client:
             await self._client.aclose()
 
     def _payload(self, request: LLMRequest, *, stream: bool) -> dict[str, object]:
+        """把内部请求转换为兼容服务的 JSON 请求体。"""
         payload: dict[str, object] = {
             "model": request.model,
             "messages": [
@@ -186,8 +191,10 @@ class OpenAICompatibleProvider:
             payload["stream_options"] = {"include_usage": True}
         if request.structured_output is not None:
             if self._structured_output_mode is LLMStructuredOutputMode.JSON_OBJECT:
+                # DeepSeek 等服务只保证“合法 JSON”，字段仍由本地 Pydantic 二次校验。
                 payload["response_format"] = {"type": "json_object"}
             else:
+                # 支持严格 Schema 的服务直接接收完整 JSON Schema。
                 payload["response_format"] = {
                     "type": "json_schema",
                     "json_schema": {
@@ -200,6 +207,7 @@ class OpenAICompatibleProvider:
 
     @staticmethod
     def _check_status(response: httpx.Response) -> None:
+        """把 HTTP 状态映射成安全异常，不向上游泄露供应商原始响应体。"""
         if response.status_code in _RETRYABLE_STATUS_CODES:
             raise _RetryableStatusError
         if response.is_error:
@@ -207,6 +215,7 @@ class OpenAICompatibleProvider:
 
     @staticmethod
     def _parse_completion(response: httpx.Response) -> LLMResponse:
+        """校验供应商响应外壳并转换为内部稳定响应。"""
         try:
             envelope = _CompletionEnvelope.model_validate(response.json())
             choice = envelope.choices[0]

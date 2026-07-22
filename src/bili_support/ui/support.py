@@ -1,4 +1,4 @@
-"""Small but usable NiceGUI client for persisted streaming conversations."""
+"""提供持久化客服对话与意图识别实验的 NiceGUI 页面。"""
 
 from __future__ import annotations
 
@@ -13,17 +13,17 @@ from bili_support.services.conversations import ConversationService
 
 
 def register_support_ui(
-    fastapi_app: FastAPI,
-    *,
-    service: ConversationService,
-    intent_classifier: IntentClassifier,
-    expected_token: str,
-    storage_secret: str,
-    prefill_demo_credentials: bool = False,
-    intent_provider_name: str = "mock",
-    intent_model: str = "mock-support-model",
+        fastapi_app: FastAPI,
+        *,
+        service: ConversationService,
+        intent_classifier: IntentClassifier,
+        expected_token: str,
+        storage_secret: str,
+        prefill_demo_credentials: bool = False,
+        intent_provider_name: str = "mock",
+        intent_model: str = "mock-support-model",
 ) -> None:
-    """Mount the learning UI on an existing FastAPI application."""
+    """把学习页面挂载到已经完成依赖装配的 FastAPI 应用。"""
 
     def support_page() -> None:
         state: dict[str, str | None] = {"thread_id": None}
@@ -74,6 +74,7 @@ def register_support_ui(
                         )
 
         def actor() -> UserContext:
+            """统一验证页面凭证；模型调用不能绕过现有鉴权边界。"""
             return authenticate_user(
                 expected_token,
                 token.value or "",
@@ -82,6 +83,7 @@ def register_support_ui(
             )
 
         async def create_conversation() -> None:
+            """显式创建持久化会话；意图识别不会调用此函数。"""
             try:
                 conversation = await service.create(actor(), "NiceGUI 客服会话")
             except AppError as exc:
@@ -93,6 +95,7 @@ def register_support_ui(
             ui.notify("会话已创建", type="positive")
 
         async def send() -> None:
+            """进入正式客服链路：必要时建会话、写消息并流式生成回答。"""
             content = (question.value or "").strip()
             if not content:
                 ui.notify("请输入问题", type="warning")
@@ -114,10 +117,10 @@ def register_support_ui(
             complete = ""
             try:
                 async for chunk in service.stream(
-                    actor=current_actor,
-                    thread_id=state["thread_id"],
-                    content=content,
-                    request_id=f"ui-{conversation_request_id()}",
+                        actor=current_actor,
+                        thread_id=state["thread_id"],
+                        content=content,
+                        request_id=f"ui-{conversation_request_id()}",
                 ):
                     complete += chunk.delta
                     answer.set_content(complete)
@@ -125,6 +128,7 @@ def register_support_ui(
                 answer.set_content(f"请求失败：{exc.message}")
 
         def render_intent(decision: IntentDecision) -> None:
+            """只渲染已经通过 Pydantic 校验的结构化决策。"""
             intent_result.clear()
             with intent_result:
                 with ui.row().classes("items-center gap-2"):
@@ -159,11 +163,13 @@ def register_support_ui(
                     ).classes("text-orange")
 
         async def classify_intent() -> None:
+            """调用意图模型但不创建会话、不写数据库、不执行工具。"""
             content = (question.value or "").strip()
             if not content:
                 ui.notify("请输入问题", type="warning")
                 return
             try:
+                # 意图调用也可能产生真实模型费用，因此必须先验证身份。
                 actor()
                 result = await intent_classifier.classify(content)
             except AppError as exc:
@@ -173,6 +179,7 @@ def register_support_ui(
                 ui.notify("问题不能为空且不能超过 4000 个字符", type="warning")
                 return
             if result.value is None:
+                # 页面只显示稳定错误码，绝不展示模型原文或供应商异常体。
                 error_code = result.error_code
                 message = error_code.value if error_code is not None else "unknown"
                 intent_result.clear()

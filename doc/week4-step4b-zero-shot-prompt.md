@@ -519,3 +519,19 @@ src/bili_support/ui/support.py              # 页面调用与结果展示
 失败链路分层处理：空问题在网络前失败；429/5xx/网络错误由 Provider 有限重试；合法响应但 JSON
 或 Schema 不合规由分类器进行一次结构重试；仍失败则只返回稳定错误码。任何失败都不会创建会话、
 写业务消息或执行工具。
+
+## 21. 关键代码中文注释记录
+
+已沿第 20 节阅读路径补充中文注释，注释重点说明设计原因而不是重复代码字面含义：
+
+- `intent/types.py`：不可变契约、顶层路由闸门、澄清一致性和子意图去重。
+- `llm/prompts.py`：Zero-shot v1 与 USER/SYSTEM 边界。
+- `intent/classifier.py`：无网络请求构造、结构重试与不回传首次模型原文。
+- `llm/structured.py`：JSON 语法校验和 Pydantic 业务校验的两层边界。
+- `intent/factory.py`：真实 Provider 共享与意图专用 Mock 的原因。
+- `llm/openai_compatible.py`：Key 边界、HTTP 重试、流式重复风险、`json_object` 与
+  `json_schema` 差异。
+- `main.py`：依赖装配、共享 Provider 单次关闭、`app.state` 实例复用。
+- `ui/support.py`：鉴权、正式客服会话和无数据库副作用的意图实验链路。
+
+注释补充后专项 Ruff、strict mypy 和 43 项意图相关测试通过。
