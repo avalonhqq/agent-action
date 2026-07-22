@@ -54,7 +54,7 @@
 | 类型 | 内容 | 状态 |
 |---|---|---|
 | AI 核心 | `IntentDecision`、多标签意图、实体、情绪、风险和澄清判断 | 已完成 |
-| AI 核心 | Zero-shot/Few-shot/混合基线及 Prompt v1/v2 | 待开始 |
+| AI 核心 | Zero-shot/Few-shot/混合基线及 Prompt v1/v2 | 进行中（Zero-shot v1 已完成） |
 | AI 核心 | Macro-F1、混淆矩阵、误拒绝率和高风险漏判率 | 待开始 |
 | 自动底座 | 评估数据加载、批量 CLI、结果存储、API 和报告页 | 由 Codex 实现 |
 | 自动底座 | Mock Provider、Fixture、日志、错误处理和测试脚手架 | 由 Codex 实现 |
@@ -65,7 +65,7 @@
 |---|---|---|---|
 | 4A | `IntentDecision`、枚举、实体与跨字段约束 | 已完成 | 18 项专项测试；全量 125 tests；Ruff、mypy 通过 |
 | 4B | `intent_classification:v1` Zero-shot Prompt | 已完成 | Prompt、严格 Schema、分类器、Mock/真实 Provider、页面与 CLI |
-| 4C | Few-shot 与规则/模型混合分类器 | 待开始 | |
+| 4C | Few-shot 与规则/模型混合分类器 | 进行中 | 4C-1/4C-2 已完成；下一步为 4C-3 混合编排器 |
 | 4D | 固定评估集、指标与批量运行底座 | 待开始 | |
 | 4E | 失败样本分析与 Prompt v2 | 待开始 | |
 | 4F | 接入客服路由、复盘与质量门禁 | 待开始 | |

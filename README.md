@@ -473,3 +473,6 @@ python -m uvicorn bili_support.main:app --reload --port 8011
 第二周实现、逐步讲解与知识问答见 [第二周完成报告](doc/week2-completion.md)。
 
 第三周数据层、会话、鉴权、NiceGUI 与知识问答见 [第三周完成报告](doc/week3-completion.md)。
+
+第四周意图契约、Zero-shot、Few-shot 与混合分类任务见
+[第四周学习与任务记录](doc/week4-learning-record.md)。

@@ -1,4 +1,6 @@
-# 第 4 周 Step 4B：Zero-shot 意图分类 Prompt
+# Zero-shot 意图分类指南（原第 4 周 Step 4B）
+
+> 本文是技术讲解资料；第 4 周任务状态统一记录在 `doc/week4-learning-record.md`。
 
 > 状态：已完成  
 > 开始日期：2026-07-21  
