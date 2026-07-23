@@ -2,6 +2,8 @@
 
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
+from bili_support.intent.hybrid import HybridIntentClassifier, HybridIntentResult
+from bili_support.intent.rules import RuleIntentClassifier, RuleMatch
 from bili_support.intent.types import (
     BusinessDomain,
     DecisionSource,
@@ -24,7 +26,11 @@ __all__ = [
     "IntentDecision",
     "IntentEntity",
     "IntentRoute",
+    "HybridIntentClassifier",
+    "HybridIntentResult",
     "RiskLevel",
+    "RuleIntentClassifier",
+    "RuleMatch",
     "Sentiment",
     "SubIntent",
     "build_intent_provider",

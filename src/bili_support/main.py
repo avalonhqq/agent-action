@@ -24,6 +24,8 @@ from bili_support.core.request_context import RequestContextMiddleware
 from bili_support.core.security import create_auth_dependency
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
+from bili_support.intent.hybrid import HybridIntentClassifier
+from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.llm.context import BoundedContextBuilder, StandaloneQueryRewriter
 from bili_support.llm.factory import build_llm_provider
 from bili_support.llm.openai_compatible import OpenAICompatibleProvider
@@ -88,8 +90,8 @@ def create_app(
         chat_service,
         history_cache=current_history_cache,
     )
-    # 分类器只生成结构化决策，不保存会话，也不执行任何业务工具。
-    intent_classifier = IntentClassifier(
+    # 模型分类器负责开放语义；外层混合分类器先执行高精度规则。
+    model_intent_classifier = IntentClassifier(
         provider=current_intent_provider,
         prompt_registry=prompt_registry,
         model=current_settings.llm_model,
@@ -97,6 +99,10 @@ def create_app(
         max_tokens=current_settings.llm_max_tokens,
         timeout_seconds=current_settings.llm_timeout_seconds,
         parse_retries=current_settings.intent_parse_retries,
+    )
+    intent_classifier = HybridIntentClassifier(
+        rule_classifier=RuleIntentClassifier(),
+        model_classifier=model_intent_classifier,
     )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
 
@@ -130,7 +136,7 @@ def create_app(
     application.include_router(
         create_api_router(chat_service, conversation_service, authenticate)
     )
-    # 页面和后续路由从 app.state 获取已装配实例，不在请求中重复创建客户端。
+    # 页面和后续路由复用同一个混合分类器，不在请求中重复创建规则或模型客户端。
     application.state.usage_recorder = recorder
     application.state.database = current_database
     application.state.conversation_service = conversation_service

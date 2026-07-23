@@ -7,7 +7,7 @@ from nicegui import ui
 
 from bili_support.core.exceptions import AppError
 from bili_support.core.security import UserContext, authenticate_user
-from bili_support.intent.classifier import IntentClassifier
+from bili_support.intent.hybrid import HybridIntentClassifier
 from bili_support.intent.types import IntentDecision
 from bili_support.services.conversations import ConversationService
 
@@ -16,7 +16,7 @@ def register_support_ui(
         fastapi_app: FastAPI,
         *,
         service: ConversationService,
-        intent_classifier: IntentClassifier,
+        intent_classifier: HybridIntentClassifier,
         expected_token: str,
         storage_secret: str,
         prefill_demo_credentials: bool = False,
@@ -127,7 +127,11 @@ def register_support_ui(
             except AppError as exc:
                 answer.set_content(f"请求失败：{exc.message}")
 
-        def render_intent(decision: IntentDecision) -> None:
+        def render_intent(
+            decision: IntentDecision,
+            *,
+            rule_id: str | None,
+        ) -> None:
             """只渲染已经通过 Pydantic 校验的结构化决策。"""
             intent_result.clear()
             with intent_result:
@@ -138,6 +142,8 @@ def register_support_ui(
                 ui.label(
                     f"情绪：{decision.sentiment.value} · 来源：{decision.source.value}"
                 ).classes("text-caption")
+                if rule_id is not None:
+                    ui.label(f"规则：{rule_id}").classes("text-caption text-grey")
                 if decision.intents:
                     ui.label("子意图").classes("text-subtitle2")
                     with ui.row().classes("gap-2"):
@@ -178,7 +184,7 @@ def register_support_ui(
             except ValueError:
                 ui.notify("问题不能为空且不能超过 4000 个字符", type="warning")
                 return
-            if result.value is None:
+            if result.decision is None:
                 # 页面只显示稳定错误码，绝不展示模型原文或供应商异常体。
                 error_code = result.error_code
                 message = error_code.value if error_code is not None else "unknown"
@@ -188,7 +194,7 @@ def register_support_ui(
                         "text-negative"
                     )
                 return
-            render_intent(result.value)
+            render_intent(result.decision, rule_id=result.rule_id)
             ui.notify("意图识别完成", type="positive")
 
         create_button.on_click(create_conversation)

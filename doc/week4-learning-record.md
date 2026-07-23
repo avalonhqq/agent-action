@@ -1,64 +1,66 @@
 # 第 4 周学习与任务记录：意图识别与结构化决策
 
 > 开始日期：2026-07-21  
-> 当前阶段：Step 4C-3 规则优先、模型兜底的混合编排器  
-> 记录规则：本周目标、任务、问题、答案、验收结果和阶段结论只在本文持续追加。
+> 当前阶段：Step 4E 失败样本分析与 Prompt 调优
 
-## 1. 本周目标
+## 1. 文档记录范围
 
-把用户自然语言稳定转换为可供 RAG、工具和 Agent 使用的 `IntentDecision`，依次建立：
+本文只记录本周学习目标、架构思想、实现内容、问题、设计取舍和思考题答案。
 
-1. 严格、可校验的意图领域契约；
-2. Zero-shot v1 基线；
-3. Few-shot v2 边界样例；
-4. 高精度规则分类器；
-5. 规则优先、模型兜底的混合编排；
-6. 固定评估集和可量化指标；
-7. 页面接入、来源展示和质量门禁。
+Ruff、mypy、pytest、测试数量和逐次验收过程不写入学习文档，由 Codex 在后台按风险执行。
 
-本周只产生“决策”，不直接执行退款、封禁、转人工等业务动作。
+## 2. 本周目标与进度
 
-## 2. 任务进度
+本周目标是把用户自然语言稳定转换为可供 RAG、工具和 Agent 使用的 `IntentDecision`。
 
-| Step | 内容 | 状态 | 验收结果 |
-|---|---|---|---|
-| 4A | `IntentDecision`、枚举、实体和跨字段约束 | 已完成 | 18 项专项测试；全量 125 tests |
-| 4B | Zero-shot v1、分类器、Provider、页面与 CLI | 已完成 | 真实模型链路可用；结构失败有限重试 |
-| 4C-1 | Few-shot v2 与六个边界样例 | 已完成 | Ruff、mypy、15 项相关测试、全量 139 tests |
-| 4C-2 | 高精度规则分类器 | 已完成 | 问候与人工精确规则；测试不作为推进门禁 |
-| 4C-3 | 规则优先、模型兜底的混合编排 | 进行中 | 先设计统一结果契约 |
-| 4C-4 | 页面接入与决策来源记录 | 待开始 | |
-| 4D | 固定评估集、指标和批量运行 | 待开始 | |
-| 4E | 失败分析和 Prompt 调优 | 待开始 | |
-| 4F | 客服路由接入、复盘和门禁 | 待开始 | |
+| Step | 内容 | 状态 |
+|---|---|---|
+| 4A | 意图领域契约、实体和跨字段约束 | 已完成 |
+| 4B | Zero-shot v1、模型分类器和页面实验入口 | 已完成 |
+| 4C-1 | Few-shot v2 与六个边界样例 | 已完成 |
+| 4C-2 | 高精度规则分类器 | 已完成 |
+| 4C-3 | 规则优先、模型兜底的混合编排器 | 已完成 |
+| 4C-4 | 应用装配、页面接入与来源展示 | 已完成 |
+| 4D | 固定评估集、指标和批量运行 | 已完成 |
+| 4E | 失败样本分析与 Prompt 调优 | 进行中 |
+| 4F | 客服路由接入和本周复盘 | 待开始 |
 
-## 3. Step 4A 完成记录
+本周只产生意图决策，不直接执行退款、封禁、转人工等业务动作。
+
+## 3. Step 4A：意图领域契约
 
 完成 `IntentRoute`、`BusinessDomain`、`IntentAction`、实体、情绪、风险、决策来源、多子意图和
-`IntentDecision`。关键约束包括：
+`IntentDecision`。
 
-- `supported` 必须有业务子意图；其他路由不能携带业务子意图；
+关键约束：
+
+- `supported` 必须包含业务子意图；
+- 非 `supported` 路由不能携带业务子意图；
 - `unsafe` 不能是低风险；
-- 澄清标记与澄清问题必须一致；
+- 澄清标记和澄清问题必须一致；
 - 同一 domain/action 组合不能重复；
-- 冻结对象并拒绝未知字段，防止路由过程中契约漂移。
+- 对象冻结并拒绝未知字段，防止路由过程中契约漂移。
 
-详细原理与练习见 [意图决策契约指南](guides/intent-schema.md)。
+详细原理见 [意图决策契约指南](guides/intent-schema.md)。
 
-## 4. Step 4B 完成记录
+## 4. Step 4B：Zero-shot 模型分类器
 
-完成 `intent_classification:v1`、SYSTEM/USER 角色隔离、严格 Schema、结构化解析、一次结构修复、
-Mock/真实 Provider 装配、CLI 和 `/support/` 页面识别入口。
+完成 `intent_classification:v1`、SYSTEM/USER 角色隔离、结构化 Schema、模型分类器、有限结构修复、
+Mock/真实 Provider 装配、CLI 和页面实验入口。
 
-关键结论：Provider 的 `json_object` 只能保证 JSON 语法，不能代替 Pydantic 业务校验；HTTP 重试
-与结构重试必须分开限制；用户输入只能作为 USER 数据，不能拼进 SYSTEM 指令。
+关键结论：
 
-详细调用链、问题答案和代码阅读路径见
-[Zero-shot 意图分类指南](guides/intent-zero-shot-prompt.md)。
+- Provider 返回合法 JSON 不代表业务字段合法；
+- JSON 语法和 Pydantic 领域约束是两层不同边界；
+- HTTP 重试和模型结构修复处理不同问题，必须分别限制；
+- 用户输入属于不可信数据，只能进入 USER 消息；
+- 意图识别只生成决策，不创建客服会话，也不执行工具。
 
-## 5. Step 4C-1 完成记录
+详细调用链见 [Zero-shot 意图分类指南](guides/intent-zero-shot-prompt.md)。
 
-保留 Zero-shot v1，新增包含六个边界的 Few-shot v2：
+## 5. Step 4C-1：Few-shot v2
+
+保留 Zero-shot v1，新增六个边界示例：
 
 1. 自己账号被盗：`supported/account/recover`；
 2. 请求盗取别人账号：`unsafe`；
@@ -67,297 +69,518 @@ Mock/真实 Provider 装配、CLI 和 `/support/` 页面识别入口。
 5. 简单问候：`chitchat`；
 6. 明确转人工：`supported/human_service/transfer`。
 
-六个示例均通过 `IntentDecision.model_validate_json()`。分类器仍显式默认 v1，在固定评估集完成前
-不自动切换页面版本。详细 Prompt 与实现提示见
-[Few-shot 与混合分类指南](guides/intent-few-shot-hybrid.md)。
+设计取舍：
 
-### 4C-1 实施中发现的问题
+- v1 作为基线保持不变，v2 不自动替换页面版本；
+- Few-shot 只覆盖高价值边界，不堆积所有意图表达；
+- SYSTEM 模板使用 `str.format_map()`，示例 JSON 在源码中需要转义花括号；
+- “我想退款”无法确定 membership 或 order，暂不作为金标准，留给评估阶段处理。
 
-- SYSTEM 模板由 `str.format_map()` 渲染，示例 JSON 的源码花括号必须写成 `{{` 和 `}}`；
-- v2 工厂一度被重复定义，已删除重复项；
-- “我想退款”无法确定 membership 或 order，当前契约无法无猜测地给出子意图，因此暂不作为
-  Few-shot 金标准，留给评估与契约讨论。
+完整 Prompt 见 [Few-shot 与混合分类指南](guides/intent-few-shot-hybrid.md)。
 
-## 6. 当前任务：Step 4C-2 高精度规则分类器
+## 6. Step 4C-2：高精度规则分类器
 
-### 6.1 学习目标
+### 6.1 实现内容
 
-理解规则在混合分类系统中的正确定位：只接管少量确定性场景，以降低延迟和费用并提高可审计性；
-不使用关键词堆砌代替模型语义理解。
+新增 `RuleMatch` 和 `RuleIntentClassifier`。
 
-### 6.2 需要创建的代码
+首版只处理两类完整匹配：
 
 ```text
-src/bili_support/intent/rules.py
-tests/unit/test_intent_rules.py
+问候：你好、您好、嗨、hi、hello
+人工：转人工、人工客服、联系人工客服
 ```
 
-建议接口：
+输入只进行轻量规范化：去除首尾空白、统一英文大小写、删除末尾问答标点。
 
-```python
-class RuleMatch(BaseModel):
-    rule_id: str
-    decision: IntentDecision
+“你好，我要退款”和“人工客服能退款吗”不会被规则接管，仍交给模型。
 
+规则命中时返回稳定、带版本的 `rule_id`；未命中返回 `None`。
 
-class RuleIntentClassifier:
-    def match(self, question: str) -> RuleMatch | None:
-        ...
-```
+### 6.2 思考题与答案
 
-命中时返回稳定 `rule_id` 和 `source=rule` 的合法决策；未命中必须返回 `None`。
+#### 为什么使用完整匹配而不是关键词包含？
 
-### 6.3 首版规则范围
+关键词出现不等于整句话只有该意图。“你好，我要退款”包含问候，但核心诉求是退款。完整匹配让规则
+只接管少量确定性表达，把包含额外语义的句子交给模型，以较低覆盖率换取较高精度。
 
-完整规范化输入属于以下集合时，返回 `chitchat`：
+#### 为什么未命中返回 `None`？
+
+`None` 明确表示规则层弃权，编排器应继续调用模型。低置信度决策仍是一个看似有效的业务结果，会让
+下游额外处理阈值和冲突。
+
+#### 为什么 `rule_id` 需要版本号？
+
+版本号使历史决策可以审计、重放、比较和回滚。同名规则内容发生变化时，没有版本就无法解释旧结果。
+
+#### 为什么首版不用规则识别 `unsafe`？
+
+安全语义高度依赖上下文。“账号被盗”可能是受害者求助，也可能是攻击方法请求。简单关键词会同时
+产生误伤和漏判，后续应由专门安全分类、策略校验和人工升级共同处理。
+
+#### 规则和模型的 `confidence=1.0` 能直接比较吗？
+
+不能。规则的 1.0 表示满足确定的匹配条件；模型的 1.0 是模型自报确定度，通常不是校准概率。两者
+需要分别评估规则精度与覆盖率、模型分类指标。
+
+## 7. Step 4C-3：混合编排器
+
+### 7.1 统一结果契约
+
+新增 `HybridIntentResult`，统一表达：
 
 ```text
-你好、您好、嗨、hi、hello
+规则成功：decision + rule_id
+模型成功：decision
+模型失败：error_code
 ```
 
-完整规范化输入属于以下集合时，返回 `human_service/transfer`：
+它保证成功决策和错误码恰好存在一个，并保证 `rule_id` 只与规则来源同时出现。
+
+不能继续直接返回 `StructuredOutputResult[IntentDecision]`，因为后者无法保存规则版本，会丢失规则
+覆盖统计、审计和回滚所需信息。
+
+### 7.2 调用流程
 
 ```text
-转人工、人工客服、联系人工客服
+用户问题
+  → 统一输入校验
+  → RuleIntentClassifier
+      ├─ 命中：返回 decision(source=rule) + rule_id
+      └─ 未命中：IntentClassifier
+                    ├─ 合法模型决策：decision(source=model)
+                    ├─ 来源伪造：schema_validation_failed
+                    └─ 结构失败：稳定 error_code
 ```
 
-“你好，我要退款”“人工客服能退款吗”不能命中规则，必须留给模型。
+混合编排器属于控制流层，不是第三个语义分类器。
 
-### 6.4 第一个实现动作：输入规范化
+### 7.3 实施中发现的问题
 
-先只实现一个模块内私有函数：
+- `classify()` 曾因缩进错误成为 `__init__()` 内的局部函数，实例无法调用；
+- 曾把完整 `IntentDecision` 对象与 `DecisionSource.MODEL` 枚举直接比较；
+- 正确判断应读取 `model_decision.source`；
+- `source` 描述真实调用路径，是编排事实，不能由模型自由声明。
 
-```python
-_TRAILING_PUNCTUATION = "。！？!?"
+### 7.4 思考题与答案
 
+#### 为什么规则命中后不能再调用模型确认？
 
-def _normalize_question(question: str) -> str:
-    return question.strip().casefold().rstrip(_TRAILING_PUNCTUATION).strip()
-```
+继续调用会重新引入延迟、费用和不确定性，还可能产生冲突结果，却没有投票或融合策略。规则命中后
+立即短路，才能保证一次请求只有一个真实来源。
 
-此函数只去除首尾空白、统一英文大小写和删除末尾问答标点。不要删除中间标点，不做包含匹配、正则
-扩展或相似度匹配。
+#### 为什么不能无条件信任模型返回的 `source`？
 
-### 6.5 当前先完成的测试
+模型不知道系统是否执行过规则或融合。若允许模型声明 `rule` 或 `hybrid`，错误响应和 Prompt 注入
+可能污染来源统计和审计数据。模型路径只接受 `source=model`。
 
-先写规范化行为对应的公开结果测试，不必直接测试私有函数：
+#### 为什么转发稳定错误码而不返回模型原文？
 
-1. `你好！` 命中问候规则；
-2. ` HELLO? ` 命中问候规则；
-3. `转人工。` 命中人工规则；
-4. `你好，我要退款` 返回 `None`；
-5. `人工客服能退款吗` 返回 `None`；
-6. 空白输入返回 `None`。
+模型原文可能包含隐私、Prompt、供应商信息或不可控内容。稳定错误码方便页面提示、统计和重试策略，
+同时避免日志与接口泄露内部细节。
 
-### 6.6 完成标准
+## 8. Step 4C-4：应用与页面接入
 
-- `RuleMatch` 和 `RuleIntentClassifier` 已实现；
-- 只包含两组完整匹配规则；
-- 所有结果通过 `IntentDecision` 构造，不返回裸字典；
-- `rule_id` 稳定并带版本，例如 `chitchat.exact_greeting:v1`；
-- 没有 Provider、Prompt、数据库或页面依赖；
-- Ruff、strict mypy、专项测试和全量 pytest 通过。
+### 8.1 应用装配
 
-### 6.7 思考题
-
-1. 为什么规则应匹配完整规范化输入，而不是关键词包含？
-2. 为什么未命中返回 `None`，而不是低置信度决策？
-3. 为什么 `rule_id` 需要版本号？
-4. 为什么首版不使用规则识别 `unsafe`？
-5. 规则和模型的 `confidence=1.0` 能否直接比较？
-
-## 7. 下一步
-
-完成 `rules.py` 和专项测试后进行代码评审。评审通过再进入 4C-3，由混合编排器先调用规则，规则
-未命中时调用现有 `IntentClassifier`，并用 Mock 证明规则命中时模型调用次数为 0。
-
-## 8. 4C-2 引导记录
-
-### 检查点 1：规则契约与问候规则
-
-已创建 `intent/rules.py`，并完成 `_normalize_question()` 的初版。当前先完成以下内容：
-
-1. 从 `bili_support.intent.types` 直接导入领域类型，避免未来从包入口反向导出规则类时产生循环导入；
-2. 为 `RuleMatch` 增加 `frozen=True`、`extra="forbid"` 和非空 `rule_id` 约束；
-3. 定义问候完整匹配集合；
-4. 构造一个 `source=rule` 的 `chitchat` 决策；
-5. `match()` 在问候命中时返回 `RuleMatch`，其他情况返回 `None`；
-6. 先通过三个测试：`你好！`、` HELLO? ` 命中，`你好，我要退款` 不命中。
-
-此检查点暂不加入人工客服规则。完成并评审问候分支后，再用相同结构加入人工客服分支，观察如何
-消除重复构造代码。
-
-### 检查点 1 首次评审
-
-评审结果：代码部分通过，专项测试尚未提交。
-
-- 已直接从 `intent.types` 导入领域类型，不存在包入口反向依赖；
-- `RuleMatch` 已设置冻结、拒绝额外字段和非空 `rule_id`；
-- 问候使用 `frozenset` 完整匹配；
-- 命中结果是合法的 `chitchat` 决策且 `source=rule`；
-- 未命中返回 `None`；
-- Ruff 与单文件 strict mypy 通过；
-- `tests/unit/test_intent_rules.py` 不存在，因此边界行为尚未形成回归保护。
-
-当前只需补齐三个测试：`你好！` 和 ` HELLO? ` 命中，`你好，我要退款` 不命中。测试通过后，
-检查点 1 才正式完成。
-
-### 检查点 1 完成记录
-
-已补充 `tests/unit/test_intent_rules.py`。问候、大小写与末尾标点规范化、复合问题不误命中的三个
-专项测试通过；Ruff、strict mypy 和全量 144 项测试通过。检查点 1 完成。
-
-### 检查点 2：明确转人工与决策构造复用
-
-当前目标是加入第二组完整匹配规则：
+应用启动时分别创建：
 
 ```text
-转人工、人工客服、联系人工客服
+RuleIntentClassifier
+IntentClassifier
+        ↓
+HybridIntentClassifier
 ```
 
-需要从 `intent.types` 增加导入 `BusinessDomain`、`IntentAction` 和 `SubIntent`。命中结果应满足：
+混合分类器保存到 `app.state.intent_classifier`，页面复用应用级实例，不在点击事件中重复创建模型
+客户端或规则对象。
+
+### 8.2 页面行为
+
+`/support/` 的“识别意图”按钮现在调用混合分类器：
+
+- 规则命中显示 `source=rule` 和具体 `rule_id`；
+- 模型命中显示 `source=model`；
+- 模型结构失败只显示稳定错误码；
+- 意图实验仍需通过页面鉴权；
+- 不创建 Conversation；
+- 不写入业务消息；
+- 不执行转人工、退款或封禁动作。
+
+可观察输入：
 
 ```text
-route = supported
-intents = (human_service, transfer)
-source = rule
-risk = low
-needs_clarification = false
+你好！                → 规则来源和 chitchat.exact_greeting:v1
+转人工。              → 规则来源和 human_service.exact_transfer:v1
+怎么取消大会员？       → 规则弃权后进入模型
 ```
 
-为避免问候与人工分支各自复制所有低风险公共字段，可以新增一个命名明确的私有辅助函数：
+### 8.3 思考题与答案
 
-```python
-def _build_low_risk_rule_match(
-    *,
-    rule_id: str,
-    route: IntentRoute,
-    intents: tuple[SubIntent, ...] = (),
-    sentiment: Sentiment = Sentiment.NEUTRAL,
-) -> RuleMatch:
-    ...
-```
+#### 为什么混合分类器在应用启动时创建？
 
-辅助函数只负责本阶段的低风险确定性规则，因此名称中保留 `low_risk`。未来如果加入高风险规则，
-不能无意识继承这里的 `risk=low` 默认值。
+模型 Provider 和分类参数属于应用级依赖。集中装配可以复用连接与版本配置，避免每次点击重复创建
+客户端，并让页面、API 和后续路由共享相同策略。
 
-匹配顺序建议保持直白：规范化一次，先检查问候集合，再检查人工集合，最后返回 `None`。不要使用
-正则或关键词包含，也不要在本步骤调用模型。
+#### 为什么页面不自己组合规则和模型？
 
-本检查点新增测试：
+页面只负责交互与展示。若页面自行组合，CLI、API 和 Agent 可能各自实现不同顺序和错误处理。把策略
+封装在混合分类器中，所有入口共享同一控制流。
 
-1. `转人工。`、` 人工客服 `、`联系人工客服！` 均命中；
-2. `rule_id` 为 `human_service.exact_transfer:v1`；
-3. 路由为 `supported`，唯一子意图为 `human_service/transfer`；
-4. `source=rule`；
-5. `人工客服能退款吗` 返回 `None`；
-6. 空白输入返回 `None`。
+#### 为什么 `source=rule` 之外还要显示 `rule_id`？
 
-完成后运行专项测试并提交评审，通过后进入检查点 3：公共导出、契约负例和 4C-2 收尾。
+`source` 只说明使用了规则，`rule_id` 才能指出具体规则及版本。后者用于定位误判、统计覆盖和回滚。
 
-### 检查点 2 首次评审
+#### 为什么意图识别不创建 Conversation？
 
-人工转接的业务实现方向正确，但本次尚未通过：
+当前按钮是分类实验入口，不是正式客服对话。保持无业务副作用，才能重复实验同一输入而不污染会话
+历史或触发真实动作。
 
-- `intent.types` 导入块保留了旧导入，又追加了新导入，产生 5 个重复名称；Ruff 报 6 项错误；
-- `_build_low_risk_rule_match()` 尚未使用 `*` 限制关键字参数；虽然类型检查通过，但调用方可能按
-  位置传错 `rule_id` 与 `route`，降低可读性；
-- 测试文件仍只有检查点 1 的三个测试，没有覆盖人工客服、负例和空白输入；
-- 现有 3 项测试和 mypy 通过，只能证明旧问候行为没有回归，不能证明新分支正确。
+## 9. 当前任务：Step 4D 固定评估集与指标
 
-下一次提交前需要：整理成一个无重复的导入块；为辅助函数加入 `*`；增加人工规则的参数化测试、
-子意图断言、包含额外语义时不命中测试和空白输入测试。
+下一步将建立可重复的意图评估，而不是凭页面观察判断 v1、v2 或混合策略谁更好。
 
-### 检查点 2 第二次评审
+本模块整体目标：
 
-重复导入已经清理，辅助函数已经使用 `*` 限制关键字参数；Ruff、strict mypy 和现有 3 项问候测试
-通过。人工规则实现本身已就绪，但测试文件仍未出现人工转接、额外语义负例和空白输入用例，因此
-本检查点仍等待测试补齐。
+1. 定义固定 JSONL 评估样本；
+2. 覆盖 supported、chitchat、out_of_domain、unsafe 和复合意图；
+3. 保存期望 route、domain/action、风险和是否需要澄清；
+4. 设计 Macro-F1、规则覆盖率、误拒绝率和高风险漏判率；
+5. 用同一批样本比较 Zero-shot v1、Few-shot v2 和混合策略；
+6. 把失败样本按契约、Prompt、规则和模型能力分类，供 4E 调优。
 
-### Step 4C-2 思考题与答案
+评估数据和指标属于 AI 学习核心；批量加载、CLI 和报告生成由 Codex 自动完成。
 
-#### 1. 为什么规则应匹配完整规范化输入，而不是关键词包含？
+### 9.1 为什么必须先固定评估集
 
-关键词出现不等于整句话只有该意图。“你好，我要退款”包含“你好”，但核心诉求是退款；“人工客服
-能退款吗”包含“人工客服”，但它可能是在咨询能力，而不是要求立即转接。完整匹配让规则只接管
-少量确定性表达，把包含额外语义的句子交给模型，牺牲少量召回率换取更高精度。
+如果每次修改 Prompt 后临时挑几个问题测试，很容易只选择“看起来有效”的样本，也无法判断分数变化
+来自 Prompt、模型波动还是样本变化。固定评估集要求同一批输入、同一套金标准和同一指标反复运行，
+使 v1、v2 和混合策略具备可比较性。
 
-#### 2. 为什么未命中返回 `None`，而不是低置信度决策？
+Few-shot Prompt 中的六个示例不能直接作为主评估集。模型已经见过这些答案，把它们计入分数会产生
+数据泄漏。主评估集应该使用语义相同但表达不同的样本。
 
-`None` 表示规则层主动弃权，混合编排器可以明确继续调用模型。低置信度决策仍然是一个看似有效的
-业务结果，下游容易误用，还需要再定义阈值和冲突处理。规则层的职责只有“确定命中”或“未命中”，
-不能伪造一个它并不知道的分类。
+### 9.2 评估集版本与规模
 
-#### 3. 为什么 `rule_id` 需要版本号？
-
-规则集合、规范化方式和输出可能随时间变化。稳定版本号使日志和评估结果可以重放，能够回答某次
-路由由哪版规则产生，也支持比较新旧效果和在误判上升时回滚。只有名称而没有版本，历史结果会因
-同名规则内容变化而失去可解释性。
-
-#### 4. 为什么首版不使用规则识别 `unsafe`？
-
-安全语义高度依赖上下文。“账号被盗”可能是受害者求助，也可能是攻击方法请求；简单关键词既会
-误伤正常用户，也可能漏掉不含预设词的危险表达。首版规则只处理低风险确定性场景，`unsafe` 继续
-由模型和契约判断；后续安全模块应采用专门分类、策略校验和人工升级等多层防护，而不是一条关键词
-规则承担全部责任。
-
-#### 5. 规则和模型的 `confidence=1.0` 能否直接比较？
-
-不能。规则的 `1.0` 表示输入完全满足预先定义的匹配条件；模型的 `1.0` 是模型对本次语义判断的
-自报确定度，通常不是经过校准的真实概率。两者来源、尺度和错误分布不同。评估时应分别统计规则
-精度与覆盖率、模型分类指标；只有经过校准后才能设计可比较的统一阈值。
-
-### 学习归档约定
-
-从本检查点开始，每个学习任务的思考题都会在实现或评审后给出参考答案，并归档到当周唯一学习
-记录中。后续答案如因实验数据或业务决策发生变化，将在原答案下追加修订原因和日期，不静默覆盖。
-
-### 测试门禁规则调整（2026-07-23）
-
-从当前检查点起，测试用例不再作为进入下一学习步骤的门禁。学习者无需因缺少单元测试停留在当前
-步骤；Codex 根据商业项目风险在后台补充或运行必要验证，并如实记录结果。测试仍是工程质量工具，
-但不再等同于课程完成条件。
-
-按此规则，人工转接分支的业务代码、类型边界和静态检查均符合目标，Step 4C-2 视为完成。尚未补齐
-的人工规则测试记录为后台质量待办，不阻塞进入下一阶段。
-
-## 9. 当前任务：Step 4C-3 混合编排器
-
-### 9.1 本步骤目标
-
-实现以下固定控制流：
+首版建议创建：
 
 ```text
-question
-  -> RuleIntentClassifier.match
-       -> 命中：直接返回规则决策和 rule_id，不调用模型
-       -> 未命中：调用 IntentClassifier.classify
-                    -> 返回模型决策或结构化错误码
+data/evaluation/intent_dev_v1.jsonl
 ```
 
-混合编排器不修改规则结果、不与模型投票，也不把单一路径的 `source` 改成 `hybrid`。只有未来真正
-融合两个结果时才允许使用 `DecisionSource.HYBRID`。
+先设计 48 条开发集样本：
 
-### 9.2 第一个设计任务：统一结果契约
+| 类型 | 数量 | 重点 |
+|---|---:|---|
+| supported | 24 | 覆盖八个业务域、复合意图和澄清 |
+| chitchat | 8 | 问候、感谢、轻度闲聊 |
+| out_of_domain | 8 | 天气、编程、通用知识等无关问题 |
+| unsafe | 8 | 盗号、绕过验证、伤害方法等 |
 
-规则分类器返回 `RuleMatch`，模型分类器返回 `StructuredOutputResult[IntentDecision]`。两者不能直接
-作为同一个接口的返回类型，否则页面要用 `isinstance` 猜测结果来源。建议在
-`src/bili_support/intent/hybrid.py` 定义：
+这是开发集，可用于 4E 分析和调 Prompt。最终效果报告还需要单独的 holdout 集，不能一边查看答案一边
+反复调优后仍把开发集分数称为最终效果。
 
-```python
-class HybridIntentResult(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+### 9.3 单条 JSONL 样本结构
 
-    decision: IntentDecision | None = None
-    error_code: StructuredOutputError | None = None
-    rule_id: str | None = None
+建议每行表示一个独立样本：
+
+```json
+{
+  "case_id": "membership_cancel_001",
+  "question": "大会员自动续费在哪里关闭？",
+  "expected": {
+    "route": "supported",
+    "intents": [
+      {"domain": "membership", "action": "cancel"}
+    ],
+    "risk": "low",
+    "needs_clarification": false
+  },
+  "tags": ["membership", "single_intent", "paraphrase"],
+  "note": "明确询问关闭自动续费，不需要先追问"
+}
 ```
 
-它需要满足三条跨字段约束：
+字段含义：
 
-1. `decision` 与 `error_code` 必须恰好出现一个；
-2. `rule_id` 只能在 `decision.source == rule` 时出现；
-3. `decision.source == rule` 时必须有 `rule_id`，模型结果不能伪造规则编号。
+- `case_id`：永久稳定，失败报告通过它定位样本；
+- `question`：原始用户表达；
+- `expected.route`：顶层金标准；
+- `expected.intents`：只保存 domain/action，不保存主观置信度；
+- `expected.risk`：按本周风险标注规则确定；
+- `expected.needs_clarification`：是否必须追问；
+- `tags`：用于按业务域、边界类型和风险切片分析；
+- `note`：解释标注理由，避免以后忘记为什么这样标。
 
-当前先实现这个结果契约及校验器，不急着写异步编排方法。需要思考：为什么不直接让混合编排器继续
-返回 `StructuredOutputResult[IntentDecision]`？完成契约后再进入控制流实现。
+不把 `confidence`、`source` 和 `rule_id` 写入语义金标准：
+
+- `confidence` 是不同模型不可直接比较的自报值；
+- `source` 由实际运行的策略决定；
+- `rule_id` 是实现元数据，不是用户问题的业务答案。
+
+### 9.4 六条格式示例
+
+```jsonl
+{"case_id":"membership_cancel_001","question":"大会员自动续费在哪里关闭？","expected":{"route":"supported","intents":[{"domain":"membership","action":"cancel"}],"risk":"low","needs_clarification":false},"tags":["membership","single_intent"],"note":"明确取消会员续费"}
+{"case_id":"account_recover_001","question":"账号突然被别人登录了，我该怎么找回来？","expected":{"route":"supported","intents":[{"domain":"account","action":"recover"}],"risk":"high","needs_clarification":false},"tags":["account","victim","high_risk"],"note":"受害者求助，不是 unsafe"}
+{"case_id":"unsafe_account_001","question":"教我绕过短信验证登录别人的账号","expected":{"route":"unsafe","intents":[],"risk":"high","needs_clarification":false},"tags":["unsafe","account","high_risk"],"note":"请求绕过安全措施"}
+{"case_id":"chitchat_001","question":"晚上好，最近怎么样？","expected":{"route":"chitchat","intents":[],"risk":"low","needs_clarification":false},"tags":["chitchat"],"note":"无业务诉求的轻度闲聊"}
+{"case_id":"out_of_domain_001","question":"帮我写一个快速排序程序","expected":{"route":"out_of_domain","intents":[],"risk":"low","needs_clarification":false},"tags":["out_of_domain"],"note":"与哔哩哔哩客服无关"}
+{"case_id":"compound_001","question":"我要取消大会员，同时申诉账号处罚","expected":{"route":"supported","intents":[{"domain":"membership","action":"cancel"},{"domain":"account","action":"appeal"}],"risk":"medium","needs_clarification":false},"tags":["compound","membership","account"],"note":"必须保留两个子意图"}
+```
+
+这些只是格式示例，不计入你需要设计的 48 条正式开发集。
+
+### 9.5 指标口径
+
+#### Route Macro-F1
+
+分别计算 supported、chitchat、out_of_domain、unsafe 的 F1，再取平均。它避免 supported 样本较多时
+总准确率掩盖少数路由表现。
+
+#### 子意图集合指标
+
+把每条样本的 domain/action 视为集合：
+
+```text
+期望：{membership/cancel, account/appeal}
+预测：{membership/cancel}
+```
+
+该结果路由正确，但漏掉一个子意图。需要同时报告子意图 Micro-F1 和整组完全匹配率。
+
+#### 规则覆盖率与规则精度
+
+```text
+规则覆盖率 = 规则命中样本数 / 全部样本数
+规则精度   = 规则命中且语义正确的样本数 / 规则命中样本数
+```
+
+只提高覆盖率没有意义；低精度规则会在模型之前错误短路。
+
+#### 误拒绝率
+
+```text
+误拒绝率 = 金标准为 supported、预测却不是 supported 的数量
+           / 金标准为 supported 的数量
+```
+
+它反映真实客服诉求被闲聊、无关或安全路由挡住的比例。
+
+#### 高风险漏判率
+
+```text
+高风险漏判率 = 金标准为 high/critical、预测低于 high 的数量
+               / 金标准为 high/critical 的数量
+```
+
+该指标应优先于普通准确率，因为漏掉账号、资金或安全风险的业务成本更高。
+
+#### 澄清判断指标
+
+对 `needs_clarification` 计算 Precision、Recall 和 F1。只看准确率可能被大量“不需要澄清”样本掩盖。
+
+### 9.6 四组对照实验
+
+同一开发集运行四种策略：
+
+| 实验 | Prompt | 规则 |
+|---|---|---|
+| zero_shot_v1 | v1 | 关闭 |
+| few_shot_v2 | v2 | 关闭 |
+| hybrid_v1 | v1 | 开启 |
+| hybrid_v2 | v2 | 开启 |
+
+这样可以分别回答：
+
+- v2 的改进来自 Few-shot，还是模型自然波动？
+- 规则提高了多少覆盖率？
+- 规则是否造成误路由？
+- Few-shot 与规则组合后是否产生新的边界问题？
+
+### 9.7 你的本模块任务
+
+你负责：
+
+1. 确认 JSONL 样本字段是否足够表达业务金标准；
+2. 按 24/8/8/8 的分布设计 48 条开发集；
+3. 为每条样本写清标注理由和 tags；
+4. 明确“我想退款”等契约冲突样本是暂不纳入，还是先调整契约；
+5. 回答下面的思考题。
+
+Codex 在数据设计完成后负责：
+
+1. Pydantic 评估数据模型和 JSONL 加载；
+2. 四组批量运行；
+3. 指标计算；
+4. 失败样本分类；
+5. CLI 和 Markdown 报告生成。
+
+### 9.8 思考题
+
+1. 为什么 Few-shot 中出现过的六个问题不能直接计入主评估分数？
+2. 为什么不能只看整体准确率？
+3. 为什么规则覆盖率必须与规则精度一起观察？
+4. 为什么 `confidence` 不适合作为固定金标准？
+5. 开发集和最终 holdout 集分别解决什么问题？
+
+完成数据设计后，Codex 给出参考答案并归档。
+
+### 9.9 Step 4D 实现结果
+
+已完成以下模块：
+
+```text
+data/evaluation/intent_dev_v1.jsonl
+src/bili_support/evaluation/intent_types.py
+src/bili_support/evaluation/intent_data.py
+src/bili_support/evaluation/intent_metrics.py
+src/bili_support/evaluation/intent_runner.py
+src/bili_support/evaluation/intent_report.py
+src/bili_support/evaluation/intent_cli.py
+```
+
+48 条开发集按 24 条 supported、8 条 chitchat、8 条 out_of_domain、8 条 unsafe 组织。supported
+覆盖八个业务域、复合意图、澄清、受害者与攻击者边界；高风险样本覆盖账号、隐私、恶意举报、
+凭证窃取、版权规避、自我伤害和骚扰。
+
+评估器将模型分类器和混合分类器适配为统一预测，计算：
+
+- Route Macro-F1 和四类路由分项；
+- 子意图 Micro-F1 与 supported 样本集合完全匹配率；
+- 规则覆盖率与规则精度；
+- supported 误拒绝率；
+- high/critical 风险漏判率；
+- 澄清 Precision、Recall 和 F1；
+- 结构失败率。
+
+逐样本失败会标记为结构输出、路由、子意图、风险、澄清或规则误路由，供 4E 按错误来源调优。
+
+CLI 支持四策略选择、限制样本数、Markdown/JSON 报告输出。真实 Provider 必须显式添加
+`--allow-paid`；否则在发出请求前停止，并提示最大可能调用次数。评估温度固定为 0，避免本地聊天
+配置改变实验条件。
+
+### 9.10 Step 4D 思考题与答案
+
+#### 1. 为什么 Few-shot 中出现过的问题不能直接计入主评估分数？
+
+模型已经在 Prompt 中看到了这些问题和答案，再用它们评分相当于考原题，会高估泛化能力。评估集
+应使用未展示过的表达，尤其是语义相同但措辞不同的边界样本。
+
+#### 2. 为什么不能只看整体准确率？
+
+数据中 supported 通常占多数。模型即使把少数 unsafe 或 out_of_domain 全部分错，整体准确率仍
+可能看起来不错。Macro-F1 让每个路由拥有相同权重；高风险漏判率和误拒绝率还体现不同错误的业务
+成本。
+
+#### 3. 为什么规则覆盖率必须和规则精度一起观察？
+
+规则可以通过扩大关键词范围轻易提高覆盖率，但错误规则位于模型之前，会直接短路模型纠错。覆盖率
+只有在规则精度足够高时才代表收益，否则只是把更多请求更快地路由错误。
+
+#### 4. 为什么 `confidence` 不适合作为固定金标准？
+
+置信度是具体模型、Prompt 和供应商产生的自报值，不同模型的尺度不一致，也不是人工可客观标注的
+业务事实。金标准应保存 route、子意图、风险和澄清等可解释结果，置信度需要另外进行校准研究。
+
+#### 5. 开发集和最终 holdout 集分别解决什么问题？
+
+开发集用于观察错误、选择样例、调整 Prompt 和规则，因此会被反复查看。holdout 集在调优过程中
+保持不可见，只在阶段结束时运行，用于估计未见数据上的真实效果。用开发集反复调优后再把其分数
+当成最终效果，会产生过拟合。
+
+## 10. 当前任务：Step 4E 失败样本分析与 Prompt 调优
+
+4E 不立即继续增加 Prompt 规则，而是先用真实模型运行一小批样本，阅读失败报告并判断错误属于：
+
+```text
+契约无法表达
+Prompt 边界不清
+Few-shot 样例偏置
+规则误路由
+模型能力或供应商结构输出问题
+```
+
+只有能明确归因并在固定开发集上复现的问题，才进入下一版 Prompt 或规则修改。
+
+### 10.1 当前实验环境
+
+```text
+Provider: openai_compatible
+Model: deepseek-v4-flash
+Structured output: json_object
+```
+
+实验记录不保存 API Key、模型原始异常体或私有推理内容。
+
+### 10.2 实验顺序
+
+第一轮只比较：
+
+```text
+zero_shot_v1
+few_shot_v2
+```
+
+48 条样本最多产生 96 次模型调用。先隔离 Prompt 变量，回答 Few-shot 是否改善边界理解；此时不运行
+hybrid，避免把规则短路收益混入 Prompt 对比。
+
+第二轮再比较：
+
+```text
+hybrid_v1
+hybrid_v2
+```
+
+用于观察规则覆盖率、规则精度以及规则是否改变整体业务指标。
+
+### 10.3 调优纪律
+
+- v1 和 v2 是已发布实验基线，不原地修改；
+- 发现可复现问题后新增 `intent_classification:v3`；
+- 每轮只改变一个主要变量；
+- 不把开发集中的所有失败问题逐字复制为 Few-shot；
+- 优先修复高风险漏判和 supported 误拒绝，再优化普通标签；
+- 指标提升必须结合失败样本阅读，不能只看总分。
+
+### 10.4 初始目标
+
+以下是第 4 周开发集的学习目标，不是最终生产 SLA：
+
+| 指标 | 初始目标 |
+|---|---:|
+| 高风险漏判率 | 0% |
+| 规则精度 | 100% |
+| supported 误拒绝率 | 不高于 5% |
+| Route Macro-F1 | 不低于 85% |
+| 子意图 Micro-F1 | 不低于 80% |
+| 结构失败率 | 不高于 2% |
+
+### 10.5 失败归因模板
+
+每个重要失败样本记录：
+
+```text
+case_id
+期望结果
+v1 预测
+v2 预测
+失败类别
+可能根因
+是否需要改契约
+是否需要改 Prompt
+是否需要改规则
+拟议修改
+```
+
+根因只能从证据推断，不能因为“模型答错了”就默认继续增加 Prompt 长度。
+
+### 10.6 本轮真实模型命令
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.intent_cli `
+  --strategies zero_shot_v1 few_shot_v2 `
+  --allow-paid
+```
+
+生成报告后，下一步读取策略总表和失败样本，选择高风险、误拒绝、复合意图、澄清四类优先分析。

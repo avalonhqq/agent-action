@@ -34,6 +34,7 @@ dev = [
 
 [project.scripts]
 bili-intent = "bili_support.intent.cli:main"
+bili-intent-eval = "bili_support.evaluation.intent_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bili_support"]

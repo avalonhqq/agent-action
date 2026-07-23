@@ -20,4 +20,5 @@ data/evaluation/*
 !data/knowledge/.gitkeep
 !data/fixtures/.gitkeep
 !data/evaluation/.gitkeep
+!data/evaluation/intent_dev_v1.jsonl
 .obsidian/*

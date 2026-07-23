@@ -11,14 +11,10 @@
             "id": "37482633da09ca50",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "doc/week4-step4a-intent-schema.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "week4-step4a-intent-schema"
+              "title": "新标签页"
             }
           }
         ]
@@ -156,13 +152,12 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "doc/week4-step4a-intent-schema.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "week4-step4a-intent-schema 的大纲"
+              "title": "大纲"
             }
           }
         ],
@@ -185,9 +180,19 @@
   },
   "active": "37482633da09ca50",
   "lastOpenFiles": [
-    "src/bili_support/intent/__init__.py",
-    "src/bili_support/intent/types.py",
-    "src/bili_support/intent",
+    "data/evaluation/intent_real_run.stderr.log",
+    "data/evaluation/intent_real_run.stdout.log",
+    "tests/unit/__pycache__/test_intent_evaluation.cpython-313-pytest-9.1.1.pyc",
+    "tests/unit/test_intent_evaluation.py",
+    "data/evaluation/intent_eval_report.json",
+    "data/evaluation/intent_eval_report.md",
+    "src/bili_support/evaluation/__pycache__/intent_metrics.cpython-313.pyc",
+    "src/bili_support/evaluation/__pycache__/intent_runner.cpython-313.pyc",
+    "src/bili_support/evaluation/__pycache__/intent_report.cpython-313.pyc",
+    "src/bili_support/evaluation/__pycache__/intent_cli.cpython-313.pyc",
+    "src/bili_support/evaluation/__pycache__/intent_types.cpython-313.pyc",
+    "src/bili_support/evaluation/__pycache__/__init__.cpython-313.pyc",
+    "doc/week4-learning-record.md",
     "doc/current-step.md",
     "doc/learning-plan.md",
     "doc/week4-step4a-intent-schema.md",
@@ -206,14 +211,6 @@
     "doc/week3-completion.md",
     "doc/week2-step2a-completion.md",
     "doc/week2-completion.md",
-    "tests/unit/__pycache__/test_conversation_cache.cpython-313-pytest-9.1.1.pyc",
-    "tests/unit/test_conversation_cache.py",
-    "doc/mysql-schema.sql",
-    "src/bili_support/core/__pycache__/cache.cpython-313.pyc",
-    "src/bili_support/core/cache.py",
-    "data/bili_support.db",
-    "tests/unit/__pycache__/test_support_ui.cpython-313-pytest-9.1.1.pyc",
-    "tests/unit/test_support_ui.py",
     "README.md",
     "doc/decisions.md",
     "customer/doc/current-step.md",
