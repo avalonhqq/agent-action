@@ -3,6 +3,7 @@
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier, HybridIntentResult
+from bili_support.intent.policies import HybridIntentPolicy, IntentPolicyResult
 from bili_support.intent.rules import RuleIntentClassifier, RuleMatch
 from bili_support.intent.types import (
     BusinessDomain,
@@ -27,7 +28,9 @@ __all__ = [
     "IntentEntity",
     "IntentRoute",
     "HybridIntentClassifier",
+    "HybridIntentPolicy",
     "HybridIntentResult",
+    "IntentPolicyResult",
     "RiskLevel",
     "RuleIntentClassifier",
     "RuleMatch",

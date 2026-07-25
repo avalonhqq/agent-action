@@ -112,6 +112,7 @@ def register_support_ui(
             with messages:
                 ui.chat_message(content, name=current_actor.display_name, sent=True)
                 with ui.chat_message(name="BiliSupport AI"):
+                    route_label = ui.label("").classes("text-caption text-grey")
                     answer = ui.markdown("")
             question.value = ""
             complete = ""
@@ -122,15 +123,25 @@ def register_support_ui(
                         content=content,
                         request_id=f"ui-{conversation_request_id()}",
                 ):
+                    if chunk.routing is not None:
+                        mock_label = (
+                            " · Mock 下游"
+                            if chunk.routing.mocked_downstream
+                            else ""
+                        )
+                        route_label.set_text(
+                            f"路由：{chunk.routing.target.value}{mock_label}"
+                        )
                     complete += chunk.delta
                     answer.set_content(complete)
             except AppError as exc:
                 answer.set_content(f"请求失败：{exc.message}")
 
         def render_intent(
-            decision: IntentDecision,
-            *,
-            rule_id: str | None,
+                decision: IntentDecision,
+                *,
+                rule_id: str | None,
+                applied_policy_ids: tuple[str, ...],
         ) -> None:
             """只渲染已经通过 Pydantic 校验的结构化决策。"""
             intent_result.clear()
@@ -144,6 +155,10 @@ def register_support_ui(
                 ).classes("text-caption")
                 if rule_id is not None:
                     ui.label(f"规则：{rule_id}").classes("text-caption text-grey")
+                if applied_policy_ids:
+                    ui.label(
+                        f"兜底策略：{', '.join(applied_policy_ids)}"
+                    ).classes("text-caption text-grey")
                 if decision.intents:
                     ui.label("子意图").classes("text-subtitle2")
                     with ui.row().classes("gap-2"):
@@ -194,7 +209,11 @@ def register_support_ui(
                         "text-negative"
                     )
                 return
-            render_intent(result.decision, rule_id=result.rule_id)
+            render_intent(
+                result.decision,
+                rule_id=result.rule_id,
+                applied_policy_ids=result.applied_policy_ids,
+            )
             ui.notify("意图识别完成", type="positive")
 
         create_button.on_click(create_conversation)

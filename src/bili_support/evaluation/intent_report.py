@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from bili_support.evaluation.intent_types import IntentEvaluationReport
+from bili_support.evaluation.intent_types import (
+    IntentEvaluationReport,
+    StrategyEvaluationReport,
+)
 
 
 def render_intent_evaluation_markdown(report: IntentEvaluationReport) -> str:
@@ -45,6 +48,7 @@ def render_intent_evaluation_markdown(report: IntentEvaluationReport) -> str:
                 "",
                 f"- Prompt 版本：v{strategy.prompt_version}",
                 f"- 规则：{'开启' if strategy.rules_enabled else '关闭'}",
+                _execution_summary(strategy),
                 "",
                 "### 路由分项",
                 "",
@@ -88,6 +92,20 @@ def render_intent_evaluation_markdown(report: IntentEvaluationReport) -> str:
                 f"| {prediction.rule_id or '-'} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def _execution_summary(strategy: StrategyEvaluationReport) -> str:
+    """把业务指标与“本次请求是否正常完成”分开呈现。"""
+    cases = strategy.cases
+    valid_count = sum(item.prediction.decision is not None for item in cases)
+    rule_count = sum(item.prediction.rule_id is not None for item in cases)
+    model_count = valid_count - rule_count
+    failed_count = len(cases) - valid_count
+    return (
+        f"- 执行状态：有效决策 {valid_count}/{len(cases)}"
+        f"（规则短路 {rule_count}，模型有效 {model_count}），"
+        f"调用或解析失败 {failed_count}"
+    )
 
 
 def _percent(value: float) -> str:

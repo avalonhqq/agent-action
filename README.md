@@ -350,9 +350,20 @@ BILI_SUPPORT_LLM_MODEL=你的模型名
 BILI_SUPPORT_LLM_API_KEY=你的本地密钥
 BILI_SUPPORT_LLM_TEMPERATURE=0.0
 BILI_SUPPORT_LLM_STRUCTURED_OUTPUT_MODE=json_schema
+BILI_SUPPORT_INTENT_PROMPT_VERSION=3
 ```
 
 重启服务并刷新 `/support/` 后，页面会显示 `Provider: openai_compatible` 和配置的模型名。
+当前页面使用两段式混合意图链路：精确规则在模型调用前短路；未命中时使用指定版本 Prompt，
+随后只允许确定性策略向上提升风险或补充缺参澄清。被策略校正的结果标记为 `source=hybrid`，
+页面同时展示策略编号，便于审计和复现。
+
+正式发送消息也会经过同一个 `hybrid_v3` 实例。客服路由当前包括 `safety`、
+`out_of_scope`、`clarification`、`human_review_mock`、`human_service_mock`、
+`general_chat` 和 `knowledge_mock`。知识库与人工坐席尚未接入真实下游，名称和页面会明确显示
+Mock；不安全、领域外、澄清和高风险请求使用确定性回复，不继续调用通用回答模型。流式接口会在
+文本前发送 `event: route`。
+
 也可以使用同一条调试命令：
 
 ```powershell
@@ -396,6 +407,18 @@ Remove-Item Env:BILI_SUPPORT_LLM_MODEL
 
 运行全部 48 条、四种策略时最多产生 192 次模型请求；混合策略的规则短路会减少实际调用。省略
 `--allow-paid` 时，CLI 会在任何真实模型请求发出前停止。
+
+失败归因后验证 Prompt v3：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.intent_cli `
+  --strategies tuned_v3 `
+  --allow-paid `
+  --output data/evaluation/intent_real_v3_report.md
+```
+
+`tuned_v3` 只产生最多 48 次新调用；v1/v2 的历史结构化预测可以在金标准修订后离线重新计分，无需
+为了比较而重复付费调用。
 
 DeepSeek 使用：
 

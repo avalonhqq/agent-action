@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bili_support.llm.types import FinishReason, TokenUsage
+from bili_support.routing import CustomerServiceRouteSummary
 
 
 class CreateConversationRequest(BaseModel):
@@ -63,3 +64,4 @@ class ConversationMessageResult(BaseModel):
     finish_reason: FinishReason
     usage: TokenUsage
     prompt_version: str
+    routing: CustomerServiceRouteSummary

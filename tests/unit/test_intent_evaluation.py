@@ -1,12 +1,19 @@
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
+from bili_support.core.exceptions import ErrorCode
 from bili_support.evaluation.intent_data import load_intent_evaluation_cases
 from bili_support.evaluation.intent_metrics import (
     calculate_intent_metrics,
     evaluate_intent_case,
 )
-from bili_support.evaluation.intent_types import IntentEvaluationPrediction
+from bili_support.evaluation.intent_runner import ModelEvaluationAdapter
+from bili_support.evaluation.intent_types import (
+    EvaluationStrategy,
+    IntentEvaluationPrediction,
+)
 from bili_support.intent.types import (
     DecisionSource,
     IntentDecision,
@@ -14,8 +21,14 @@ from bili_support.intent.types import (
     Sentiment,
     SubIntent,
 )
+from bili_support.llm.errors import LLMResponseError
 
 DATASET = Path("data/evaluation/intent_dev_v1.jsonl")
+
+
+class _FailingClassifier:
+    async def classify(self, question: str) -> None:
+        raise LLMResponseError
 
 
 def test_fixed_intent_dataset_has_planned_route_distribution() -> None:
@@ -72,3 +85,17 @@ def test_perfect_predictions_produce_perfect_semantic_metrics() -> None:
     assert metrics.high_risk_miss_rate == 0.0
     assert metrics.clarification.f1 == 1.0
     assert metrics.structured_failure_rate == 0.0
+
+
+@pytest.mark.asyncio
+async def test_model_provider_failure_is_recorded_per_case() -> None:
+    adapter = ModelEvaluationAdapter(
+        strategy=EvaluationStrategy.TUNED_V3,
+        prompt_version=3,
+        classifier=_FailingClassifier(),  # type: ignore[arg-type]
+    )
+
+    prediction = await adapter.predict("测试模型失败")
+
+    assert prediction.decision is None
+    assert prediction.error_code is ErrorCode.MODEL_BAD_RESPONSE

@@ -175,6 +175,8 @@ def test_stream_is_persisted_and_database_survives_app_restart(tmp_path: Path) -
             headers=_headers(request_id="stream-persist-1"),
         )
     assert "event: delta" in streamed.text
+    assert "event: route" in streamed.text
+    assert '"target": "knowledge_mock"' in streamed.text
     assert "event: completed" in streamed.text
 
     second_app = create_app(settings)
@@ -193,7 +195,7 @@ def test_stream_is_persisted_and_database_survives_app_restart(tmp_path: Path) -
             "SELECT operation, status FROM model_calls WHERE request_id = ?",
             ("stream-persist-1",),
         ).fetchone()
-    assert call == ("stream", "success")
+    assert call == ("stream:knowledge_mock", "success")
 
 
 def test_model_failure_preserves_user_message_and_auditable_error(tmp_path: Path) -> None:
@@ -226,3 +228,42 @@ def test_model_failure_preserves_user_message_and_auditable_error(tmp_path: Path
     assert call[0:2] == ("error", "MODEL_UNAVAILABLE")
     assert call[2] is not None
     assert call[3] is None
+
+
+def test_unsafe_route_skips_answer_model_and_is_auditable(tmp_path: Path) -> None:
+    database_path = tmp_path / "unsafe-route.db"
+    settings = _settings(database_path).model_copy(
+        update={
+            "intent_mock_response": (
+                '{"route":"unsafe","intents":[],"entities":[],'
+                '"sentiment":"neutral","risk":"critical","confidence":1.0,'
+                '"needs_clarification":false,"clarification_question":null,'
+                '"source":"model"}'
+            )
+        }
+    )
+    app = create_app(settings, llm_provider=_UnavailableProvider())
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/conversations",
+            json={"title": "安全路由"},
+            headers=_headers(),
+        )
+        thread_id = created.json()["data"]["thread_id"]
+        response = client.post(
+            f"/api/v1/conversations/{thread_id}/messages",
+            json={"content": "危险请求"},
+            headers=_headers(request_id="unsafe-route-1"),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["routing"]["target"] == "safety"
+    assert "不能协助" in response.json()["data"]["answer"]
+    with sqlite3.connect(database_path) as connection:
+        call = connection.execute(
+            "SELECT operation, model, total_tokens FROM model_calls "
+            "WHERE request_id = ?",
+            ("unsafe-route-1",),
+        ).fetchone()
+    assert call == ("complete:safety", "deterministic-routing", 0)

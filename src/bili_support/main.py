@@ -25,6 +25,7 @@ from bili_support.core.security import create_auth_dependency
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier
+from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.llm.context import BoundedContextBuilder, StandaloneQueryRewriter
 from bili_support.llm.factory import build_llm_provider
@@ -33,6 +34,7 @@ from bili_support.llm.prompts import create_default_prompt_registry
 from bili_support.llm.provider import LLMProvider
 from bili_support.llm.service import ChatService
 from bili_support.llm.usage import InMemoryUsageRecorder, UsageRecorder
+from bili_support.routing import CustomerServiceRouter
 from bili_support.schemas.system import HealthResponse, ReadinessResponse
 from bili_support.services.conversations import ConversationService
 from bili_support.ui import register_support_ui
@@ -85,16 +87,12 @@ def create_app(
         max_tokens=current_settings.llm_max_tokens,
         timeout_seconds=current_settings.llm_timeout_seconds,
     )
-    conversation_service = ConversationService(
-        current_database,
-        chat_service,
-        history_cache=current_history_cache,
-    )
-    # 模型分类器负责开放语义；外层混合分类器先执行高精度规则。
+    # 模型分类器负责开放语义；混合分类器在调用前短路精确规则，调用后执行安全兜底。
     model_intent_classifier = IntentClassifier(
         provider=current_intent_provider,
         prompt_registry=prompt_registry,
         model=current_settings.llm_model,
+        prompt_version=current_settings.intent_prompt_version,
         temperature=current_settings.llm_temperature,
         max_tokens=current_settings.llm_max_tokens,
         timeout_seconds=current_settings.llm_timeout_seconds,
@@ -103,6 +101,15 @@ def create_app(
     intent_classifier = HybridIntentClassifier(
         rule_classifier=RuleIntentClassifier(),
         model_classifier=model_intent_classifier,
+        policy=HybridIntentPolicy(),
+    )
+    # 正式消息先经过意图路由；第五周知识库尚未接入，知识与人工下游明确标为 Mock。
+    customer_service_router = CustomerServiceRouter(intent_classifier)
+    conversation_service = ConversationService(
+        current_database,
+        chat_service,
+        router=customer_service_router,
+        history_cache=current_history_cache,
     )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
 
@@ -153,7 +160,8 @@ def create_app(
     async def ready() -> ReadinessResponse:
         try:
             await current_database.ping()
-        except SQLAlchemyError as exc:
+        except (SQLAlchemyError, RuntimeError) as exc:
+            # MySQL 驱动缺少认证依赖等初始化错误也必须表现为“未就绪”，而不是 500。
             raise ServiceNotReadyError() from exc
         checks: dict[str, Literal["ready", "degraded"]] = {
             "configuration": "ready",

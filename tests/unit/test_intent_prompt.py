@@ -23,6 +23,19 @@ def test_default_registry_contains_intent_prompt_v2() -> None:
     assert prompt.identifier == "intent_classification:v2"
 
 
+def test_default_registry_contains_intent_prompt_v3() -> None:
+    prompt = create_default_prompt_registry().get(
+        "intent_classification",
+        version=3,
+    )
+
+    assert prompt.identifier == "intent_classification:v3"
+    system_message = prompt.render({"question": "test"})[0].content
+    assert "风险等级按潜在业务伤害选择" in system_message
+    assert "澄清判断区分“询问流程”和“要求立即执行”" in system_message
+    assert "客户端闪退、黑屏、播放、投稿上传失败" in system_message
+
+
 def test_intent_prompt_renders_system_and_user_messages() -> None:
     prompt = create_default_prompt_registry().get(
         "intent_classification",

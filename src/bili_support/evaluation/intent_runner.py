@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
+from bili_support.core.exceptions import AppError
 from bili_support.evaluation.intent_metrics import (
     calculate_intent_metrics,
     evaluate_intent_case,
@@ -18,6 +19,8 @@ from bili_support.evaluation.intent_types import (
 )
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.hybrid import HybridIntentClassifier
+from bili_support.intent.policies import HybridIntentPolicy
+from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.intent.types import DecisionSource
 from bili_support.llm.structured import StructuredOutputError
 
@@ -48,7 +51,11 @@ class ModelEvaluationAdapter:
         self._classifier = classifier
 
     async def predict(self, question: str) -> IntentEvaluationPrediction:
-        result = await self._classifier.classify(question)
+        try:
+            result = await self._classifier.classify(question)
+        except AppError as exc:
+            # 单条 Provider 故障必须留在该样本，不能让整批评估丢失进度。
+            return IntentEvaluationPrediction(error_code=exc.code)
         if result.value is not None:
             if result.value.source is not DecisionSource.MODEL:
                 return IntentEvaluationPrediction(
@@ -76,7 +83,11 @@ class HybridEvaluationAdapter:
         self._classifier = classifier
 
     async def predict(self, question: str) -> IntentEvaluationPrediction:
-        result = await self._classifier.classify(question)
+        try:
+            result = await self._classifier.classify(question)
+        except AppError as exc:
+            # 规则未命中后的模型故障按样本记录，后续样本继续执行。
+            return IntentEvaluationPrediction(error_code=exc.code)
         return IntentEvaluationPrediction(
             decision=result.decision,
             error_code=result.error_code,
@@ -118,4 +129,92 @@ async def run_intent_evaluation(
         case_count=len(fixed_cases),
         model=model,
         strategies=tuple(strategy_reports),
+    )
+
+
+def rescore_intent_evaluation_report(
+    *,
+    report: IntentEvaluationReport,
+    cases: Iterable[IntentEvaluationCase],
+) -> IntentEvaluationReport:
+    """在不重复调用模型的情况下，使用修订后的金标准重新计算报告。"""
+    revised_cases = tuple(cases)
+    revised_by_id = {case.case_id: case for case in revised_cases}
+    if len(revised_by_id) != len(revised_cases):
+        raise ValueError("rescoring cases contain duplicate case_id")
+
+    rescored_strategies: list[StrategyEvaluationReport] = []
+    for strategy in report.strategies:
+        predictions_by_id = {
+            item.case.case_id: item.prediction
+            for item in strategy.cases
+        }
+        if predictions_by_id.keys() != revised_by_id.keys():
+            raise ValueError("rescoring cases must match report case_ids exactly")
+        case_results = tuple(
+            evaluate_intent_case(case, predictions_by_id[case.case_id])
+            for case in revised_cases
+        )
+        rescored_strategies.append(
+            StrategyEvaluationReport(
+                strategy=strategy.strategy,
+                prompt_version=strategy.prompt_version,
+                rules_enabled=strategy.rules_enabled,
+                metrics=calculate_intent_metrics(case_results),
+                cases=case_results,
+            )
+        )
+    return IntentEvaluationReport(
+        dataset=report.dataset,
+        case_count=len(revised_cases),
+        model=report.model,
+        strategies=tuple(rescored_strategies),
+    )
+
+
+def replay_hybrid_v3_report(
+    *,
+    model_report: IntentEvaluationReport,
+    rule_classifier: RuleIntentClassifier,
+    policy: HybridIntentPolicy,
+) -> IntentEvaluationReport:
+    """复用真实 v3 预测，离线重放前置规则和后置策略，不再次调用模型。"""
+    if len(model_report.strategies) != 1:
+        raise ValueError("hybrid replay requires exactly one model strategy")
+    model_strategy = model_report.strategies[0]
+    if model_strategy.strategy is not EvaluationStrategy.TUNED_V3:
+        raise ValueError("hybrid v3 replay requires tuned_v3 predictions")
+
+    case_results = []
+    for item in model_strategy.cases:
+        rule_match = rule_classifier.match(item.case.question)
+        if rule_match is not None:
+            prediction = IntentEvaluationPrediction(
+                decision=rule_match.decision,
+                rule_id=rule_match.rule_id,
+            )
+        elif item.prediction.decision is not None:
+            policy_result = policy.apply(
+                question=item.case.question,
+                decision=item.prediction.decision,
+            )
+            prediction = IntentEvaluationPrediction(
+                decision=policy_result.decision,
+            )
+        else:
+            prediction = item.prediction
+        case_results.append(evaluate_intent_case(item.case, prediction))
+
+    hybrid_strategy = StrategyEvaluationReport(
+        strategy=EvaluationStrategy.HYBRID_V3,
+        prompt_version=model_strategy.prompt_version,
+        rules_enabled=True,
+        metrics=calculate_intent_metrics(case_results),
+        cases=tuple(case_results),
+    )
+    return IntentEvaluationReport(
+        dataset=model_report.dataset,
+        case_count=model_report.case_count,
+        model=model_report.model,
+        strategies=(hybrid_strategy,),
     )

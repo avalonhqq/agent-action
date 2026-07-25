@@ -24,6 +24,7 @@ from bili_support.evaluation.intent_types import EvaluationStrategy
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier
+from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.llm.openai_compatible import OpenAICompatibleProvider
 from bili_support.llm.prompts import create_default_prompt_registry
@@ -43,7 +44,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--strategies",
         nargs="+",
         choices=[item.value for item in EvaluationStrategy],
-        default=[item.value for item in EvaluationStrategy],
+        default=[
+            EvaluationStrategy.ZERO_SHOT_V1.value,
+            EvaluationStrategy.FEW_SHOT_V2.value,
+            EvaluationStrategy.HYBRID_V1.value,
+            EvaluationStrategy.HYBRID_V2.value,
+        ],
     )
     parser.add_argument(
         "--max-cases",
@@ -88,18 +94,23 @@ def build_evaluation_adapters(
     rule_classifier = RuleIntentClassifier()
     adapters: list[IntentEvaluationAdapter] = []
     for strategy in strategies:
-        prompt_version = (
-            2
-            if strategy in {
+        if strategy in {
+            EvaluationStrategy.TUNED_V3,
+            EvaluationStrategy.HYBRID_V3,
+        }:
+            prompt_version = 3
+        elif strategy in {
                 EvaluationStrategy.FEW_SHOT_V2,
                 EvaluationStrategy.HYBRID_V2,
-            }
-            else 1
-        )
+        }:
+            prompt_version = 2
+        else:
+            prompt_version = 1
         classifier = model_classifier(prompt_version)
         if strategy in {
             EvaluationStrategy.ZERO_SHOT_V1,
             EvaluationStrategy.FEW_SHOT_V2,
+            EvaluationStrategy.TUNED_V3,
         }:
             adapters.append(
                 ModelEvaluationAdapter(
@@ -116,6 +127,11 @@ def build_evaluation_adapters(
                 classifier=HybridIntentClassifier(
                     rule_classifier=rule_classifier,
                     model_classifier=classifier,
+                    policy=(
+                        HybridIntentPolicy()
+                        if strategy is EvaluationStrategy.HYBRID_V3
+                        else None
+                    ),
                 ),
             )
         )

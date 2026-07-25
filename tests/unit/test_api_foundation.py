@@ -13,6 +13,14 @@ def _test_app() -> FastAPI:
     return create_app(Settings(_env_file=None, app_name="Test App", app_version="1.0.0"))
 
 
+class _RuntimeFailureDatabase:
+    async def ping(self) -> None:
+        raise RuntimeError("driver setup failed")
+
+    async def dispose(self) -> None:
+        return
+
+
 def test_ready_reports_initialized_configuration() -> None:
     response = TestClient(_test_app()).get("/ready")
 
@@ -27,6 +35,20 @@ def test_ready_reports_initialized_configuration() -> None:
             "llm_provider": "ready",
         },
     }
+
+
+def test_ready_maps_database_driver_runtime_error_to_service_unavailable() -> None:
+    application = create_app(
+        Settings(_env_file=None, database_auto_create=False, ui_enabled=False),
+        database=_RuntimeFailureDatabase(),  # type: ignore[arg-type]
+    )
+
+    with TestClient(application, raise_server_exceptions=False) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SERVICE_NOT_READY"
+    assert "driver setup failed" not in response.text
 
 
 def test_request_id_is_generated_and_returned() -> None:

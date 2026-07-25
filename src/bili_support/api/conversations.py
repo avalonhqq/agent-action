@@ -103,6 +103,11 @@ def create_conversation_router(
                     async for chunk in chunks:
                         if await request.is_disconnected():
                             break
+                        if chunk.routing is not None:
+                            yield _event(
+                                "route",
+                                chunk.routing.model_dump(mode="json"),
+                            )
                         if chunk.delta:
                             yield _event("delta", {"delta": chunk.delta})
                         if chunk.finish_reason is not None:

@@ -7,6 +7,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from bili_support.core.exceptions import ErrorCode
 from bili_support.intent.types import (
     BusinessDomain,
     DecisionSource,
@@ -25,6 +26,8 @@ class EvaluationStrategy(StrEnum):
     FEW_SHOT_V2 = "few_shot_v2"
     HYBRID_V1 = "hybrid_v1"
     HYBRID_V2 = "hybrid_v2"
+    TUNED_V3 = "tuned_v3"
+    HYBRID_V3 = "hybrid_v3"
 
 
 class FailureCategory(StrEnum):
@@ -107,7 +110,7 @@ class IntentEvaluationPrediction(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     decision: IntentDecision | None = None
-    error_code: StructuredOutputError | None = None
+    error_code: StructuredOutputError | ErrorCode | None = None
     rule_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")

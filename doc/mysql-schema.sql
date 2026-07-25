@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS `model_calls` (
   `user_message_id` varchar(36) NOT NULL,
   `assistant_message_id` varchar(36) DEFAULT NULL,
   `request_id` varchar(128) NOT NULL,
-  `operation` varchar(16) NOT NULL,
+  `operation` varchar(64) NOT NULL,
   `model` varchar(128) NOT NULL,
   `prompt_version` varchar(64) NOT NULL,
   `status` varchar(16) NOT NULL,
@@ -86,11 +86,14 @@ CREATE TABLE IF NOT EXISTS `model_calls` (
     CHECK (`status` IN ('success', 'error', 'cancelled'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+ALTER TABLE `model_calls`
+  MODIFY COLUMN `operation` varchar(64) NOT NULL;
+
 CREATE TABLE IF NOT EXISTS `alembic_version` (
   `version_num` varchar(32) NOT NULL,
   PRIMARY KEY (`version_num`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 INSERT INTO `alembic_version` (`version_num`)
-VALUES ('20260719_0001')
+VALUES ('20260725_0002')
 ON DUPLICATE KEY UPDATE `version_num` = VALUES(`version_num`);

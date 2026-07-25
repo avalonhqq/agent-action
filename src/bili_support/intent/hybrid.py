@@ -3,6 +3,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from bili_support.intent.classifier import IntentClassifier
+from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.intent.types import DecisionSource, IntentDecision
 from bili_support.llm.structured import StructuredOutputError
@@ -14,6 +15,7 @@ class HybridIntentResult(BaseModel):
     decision: IntentDecision | None = None
     error_code: StructuredOutputError | None = None
     rule_id: str | None = Field(default=None, min_length=1)
+    applied_policy_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_result(self) -> Self:
@@ -25,9 +27,9 @@ class HybridIntentResult(BaseModel):
 
         # 错误结果不是规则命中，不能携带规则编号。
         if self.decision is None:
-            if self.rule_id is not None:
+            if self.rule_id is not None or self.applied_policy_ids:
                 raise ValueError(
-                    "failed result must not contain rule_id"
+                    "failed result must not contain decision metadata"
                 )
             return self
 
@@ -39,6 +41,11 @@ class HybridIntentResult(BaseModel):
             raise ValueError(
                 "rule_id must be present exactly for rule decisions"
             )
+        is_hybrid_decision = self.decision.source is DecisionSource.HYBRID
+        if is_hybrid_decision != bool(self.applied_policy_ids):
+            raise ValueError(
+                "applied_policy_ids must be present exactly for hybrid decisions"
+            )
 
         return self
 
@@ -49,9 +56,11 @@ class HybridIntentClassifier:
         *,
         rule_classifier: RuleIntentClassifier,
         model_classifier: IntentClassifier,
+        policy: HybridIntentPolicy | None = None,
     ) -> None:
         self._rule_classifier = rule_classifier
         self._model_classifier = model_classifier
+        self._policy = policy
 
     async def classify(self, question: str) -> HybridIntentResult:
         """优先使用高精度规则，规则弃权后再调用模型分类器。"""
@@ -76,7 +85,16 @@ class HybridIntentClassifier:
                 return HybridIntentResult(
                     error_code=StructuredOutputError.SCHEMA_VALIDATION_FAILED
                 )
-            return HybridIntentResult(decision=model_decision)
+            if self._policy is None:
+                return HybridIntentResult(decision=model_decision)
+            policy_result = self._policy.apply(
+                question=normalized_question,
+                decision=model_decision,
+            )
+            return HybridIntentResult(
+                decision=policy_result.decision,
+                applied_policy_ids=policy_result.applied_policy_ids,
+            )
 
         # StructuredOutputResult 已保证成功值和错误码恰好存在一个。
         error_code = model_result.error_code

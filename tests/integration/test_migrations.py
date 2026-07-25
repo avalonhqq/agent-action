@@ -34,7 +34,13 @@ def test_initial_migration_is_repeatable(
             )
         }
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        operation_column = next(
+            row
+            for row in connection.execute("PRAGMA table_info(model_calls)")
+            if row[1] == "operation"
+        )
     reset_settings()
 
     assert {"users", "conversations", "messages", "model_calls"} <= tables
-    assert revision == ("20260719_0001",)
+    assert revision == ("20260725_0002",)
+    assert operation_column[2] == "VARCHAR(64)"

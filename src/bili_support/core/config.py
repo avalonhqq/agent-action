@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     )
     llm_mock_response: str = "这是来自确定性 Mock Provider 的客服回复。"
     intent_mock_response: str = _DEFAULT_INTENT_MOCK_RESPONSE
+    # 页面默认使用当前已评估的 Prompt；历史版本仍由离线评估器显式选择。
+    intent_prompt_version: int = Field(default=3, ge=1)
     # 结构重试与 HTTP 重试分开计数，防止格式错误导致无限付费调用。
     intent_parse_retries: int = Field(default=1, ge=0, le=3)
     llm_max_retries: int = Field(default=2, ge=0, le=10)

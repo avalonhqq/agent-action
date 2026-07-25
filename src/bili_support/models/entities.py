@@ -73,7 +73,8 @@ class ModelCall(Base):
         ForeignKey("messages.id", ondelete="SET NULL"), index=True
     )
     request_id: Mapped[str] = mapped_column(String(128), index=True)
-    operation: Mapped[str] = mapped_column(String(16))
+    # 路由接入后记录 complete:human_service_mock 等可审计目标。
+    operation: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(128))
     prompt_version: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16))
