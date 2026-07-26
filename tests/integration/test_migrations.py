@@ -41,6 +41,16 @@ def test_initial_migration_is_repeatable(
         )
     reset_settings()
 
-    assert {"users", "conversations", "messages", "model_calls"} <= tables
-    assert revision == ("20260725_0002",)
+    assert {
+        "users",
+        "conversations",
+        "messages",
+        "model_calls",
+        "knowledge_documents",
+        "knowledge_document_versions",
+        "knowledge_ingestion_jobs",
+        "knowledge_source_blocks",
+        "knowledge_chunks",
+    } <= tables
+    assert revision == ("20260725_0003",)
     assert operation_column[2] == "VARCHAR(64)"

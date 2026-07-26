@@ -6,14 +6,16 @@
 
 ## 项目状态
 
-前三周已经完成：项目具备工程基线、可替换的 LLM 调用链路，以及可持久化的多用户客服会话。
+前四周已经完成，第五周知识入库底座已就绪：项目具备工程基线、可替换的 LLM 调用链路、
+可持久化的多用户客服会话，以及可追溯、可版本化的文档解析能力。
 
 - 已建立标准 `src/bili_support` 工程骨架。
 - 已实现类型化配置、应用工厂、健康/就绪探针、统一错误响应、Request ID 和结构化日志。
 - 已配置 Ruff、mypy、pytest、pre-commit 和非 root Docker 运行基线。
 - 已实现 LLM 内部契约、确定性 Mock、OpenAI-compatible 适配器、Prompt 版本、结构化输出、上下文控制、Chat API、SSE 和安全用量记录。
 - 已实现 SQLAlchemy 2 异步数据层、Alembic 迁移、用户/会话/消息/模型调用、简单鉴权、持久化 SSE 和 NiceGUI 页面。
-- 数据库、知识库、RAG、Agent、业务工具和页面会按周逐步实现。
+- 已实现 PDF、DOCX、Markdown、TXT 统一 Loader、SHA-256 幂等、文档版本、解析任务和结构块持久化。
+- RAG 检索、Agent 和业务工具会按周逐步实现。
 - 课程采用“大模型核心学习 + 工程底座自动完成”模式：重点讲解并实验 Prompt、RAG、意图、Agent、安全和评估；CRUD、迁移、鉴权、页面与部署由 Codex 自动实现并通过门禁。
 
 ## 最终能力
@@ -306,6 +308,40 @@ X-User-Name: 演示用户
 | POST | `/api/v1/conversations/{thread_id}/messages/stream` | SSE 回复并持久化 |
 
 共享 Demo Token 只用于本地学习。生产环境必须接入 OIDC/OAuth2、企业 SSO 或可信 JWT，并从已验证 claims 获取用户身份。
+
+## 知识文档入库接口
+
+接口使用与会话相同的鉴权请求头。当前解析任务采用进程内同步 Mock 调度；接口和任务状态已按未来
+消息队列边界设计，后续可替换为 Celery、Dramatiq 或云任务服务。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| POST | `/api/v1/knowledge/documents` | 上传并解析 PDF、DOCX、Markdown 或 TXT |
+| GET | `/api/v1/knowledge/documents` | 查询当前用户创建的有效文档 |
+| GET | `/api/v1/knowledge/documents/{document_id}/versions` | 查询文档版本 |
+| GET | `/api/v1/knowledge/jobs/{job_id}` | 查询解析状态、错误码和结构块数量 |
+| POST | `/api/v1/knowledge/jobs/{job_id}/retry` | 重试失败任务 |
+| DELETE | `/api/v1/knowledge/documents/{document_id}` | 软删除文档 |
+
+PowerShell 上传示例：
+
+```powershell
+curl.exe -X POST http://127.0.0.1:8010/api/v1/knowledge/documents `
+  -H "Authorization: Bearer local-demo-token" `
+  -H "X-User-ID: demo-user" `
+  -F "file=@.\data\knowledge\membership.md" `
+  -F "title=大会员规则" `
+  -F "business_domain=membership" `
+  -F "access_scope=public"
+```
+
+同一逻辑文档的相同字节会命中幂等结果；内容变化则创建下一版本。原文件默认保存在
+`data/knowledge/files`，大小上限默认 10 MiB，可通过以下配置调整：
+
+```dotenv
+BILI_SUPPORT_KNOWLEDGE_STORAGE_DIR=./data/knowledge/files
+BILI_SUPPORT_KNOWLEDGE_MAX_FILE_BYTES=10485760
+```
 
 ## 可选：接入 OpenAI-compatible 服务
 

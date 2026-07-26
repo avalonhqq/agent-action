@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
     redis_history_ttl_seconds: int = Field(default=900, gt=0, le=86400)
     redis_history_max_messages: int = Field(default=100, gt=0, le=500)
+    knowledge_storage_dir: str = "./data/knowledge/files"
+    knowledge_max_file_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        gt=0,
+        le=100 * 1024 * 1024,
+    )
     api_token: SecretStr = SecretStr("local-demo-token")
     ui_enabled: bool = True
     ui_prefill_demo_credentials: bool = False
@@ -102,6 +108,7 @@ class Settings(BaseSettings):
         "llm_mock_response",
         "intent_mock_response",
         "database_url",
+        "knowledge_storage_dir",
     )
     @classmethod
     def llm_text_settings_must_not_be_blank(cls, value: str) -> str:

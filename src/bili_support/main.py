@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI
@@ -27,6 +28,8 @@ from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier
 from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
+from bili_support.knowledge.loaders import create_default_loader_registry
+from bili_support.knowledge.storage import LocalKnowledgeFileStore
 from bili_support.llm.context import BoundedContextBuilder, StandaloneQueryRewriter
 from bili_support.llm.factory import build_llm_provider
 from bili_support.llm.openai_compatible import OpenAICompatibleProvider
@@ -37,6 +40,7 @@ from bili_support.llm.usage import InMemoryUsageRecorder, UsageRecorder
 from bili_support.routing import CustomerServiceRouter
 from bili_support.schemas.system import HealthResponse, ReadinessResponse
 from bili_support.services.conversations import ConversationService
+from bili_support.services.knowledge import KnowledgeIngestionService
 from bili_support.ui import register_support_ui
 
 
@@ -111,6 +115,16 @@ def create_app(
         router=customer_service_router,
         history_cache=current_history_cache,
     )
+    knowledge_service = KnowledgeIngestionService(
+        database=current_database,
+        # Loader 注册表封装文件类型差异，Service 始终只处理统一 LoadedDocument。
+        loaders=create_default_loader_registry(),
+        # 当前使用本地文件系统；替换对象存储只需实现相同读写边界。
+        file_store=LocalKnowledgeFileStore(
+            Path(current_settings.knowledge_storage_dir)
+        ),
+        max_file_bytes=current_settings.knowledge_max_file_bytes,
+    )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
 
     @asynccontextmanager
@@ -141,13 +155,19 @@ def create_app(
     application.add_middleware(RequestContextMiddleware)
     register_exception_handlers(application)
     application.include_router(
-        create_api_router(chat_service, conversation_service, authenticate)
+        create_api_router(
+            chat_service,
+            conversation_service,
+            knowledge_service,
+            authenticate,
+        )
     )
     # 页面和后续路由复用同一个混合分类器，不在请求中重复创建规则或模型客户端。
     application.state.usage_recorder = recorder
     application.state.database = current_database
     application.state.conversation_service = conversation_service
     application.state.intent_classifier = intent_classifier
+    application.state.knowledge_service = knowledge_service
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

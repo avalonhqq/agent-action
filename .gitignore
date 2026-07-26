@@ -22,3 +22,4 @@ data/evaluation/*
 !data/evaluation/.gitkeep
 !data/evaluation/intent_dev_v1.jsonl
 .obsidian/*
+.idea/
