@@ -393,7 +393,7 @@ SourceBlockType
 `knowledge_type` 字段、API 参数、数据库迁移、Repository 写入等工程底座由 Codex 自动完成；你重点
 理解并实现策略边界，不需要把精力放在 CRUD 上。
 
-## 7. 当前动手任务：5B-1 Chunk 契约与 Generic 基线
+## 7. 5B-1 Chunk 契约与 Generic 基线（已完成）
 
 ### 7.1 写在哪里
 
@@ -604,3 +604,709 @@ Child 文本能提升召回；同时保留结构化 `heading_path` 才方便后�
 
 策略是需要频繁实验的纯算法。若直接依赖数据库，会让单元实验、离线评估和策略比较变慢，也把事
 务与 UUID 生成混入分块逻辑。`ChunkDraft` 是算法层和持久化层之间的稳定边界。
+
+### 7.9 实际实现结构
+
+实现文件：
+
+```text
+src/bili_support/knowledge/chunking.py
+```
+
+从上到下分成六层：
+
+```text
+ChunkKind / DocumentKnowledgeType
+  ↓ 稳定枚举
+ChunkDraft
+  ↓ 校验Parent/Child引用
+ChunkStrategy
+  ↓ 统一策略接口
+GenericChunkStrategy.chunk
+  ↓ 编排每个SourceBlock
+_split_content / _pack_sentences / _split_oversized_sentence
+  ↓ 句子边界、装箱、滑动窗口
+_format_parent_content / _format_child_content / _block_metadata
+  ↓ 文本格式与追溯元数据
+```
+
+### 7.10 跟读一个具体输入
+
+输入：
+
+```python
+LoadedSourceBlock(
+    ordinal=1,
+    block_type=SourceBlockType.PARAGRAPH,
+    content="大会员会自动续费。用户可以在支付渠道关闭续费。",
+    page_number=2,
+    heading_path=("大会员", "自动续费"),
+)
+```
+
+#### 第一步：`GenericChunkStrategy.chunk`
+
+先检查 `ordinal=1` 是否重复。因为 `ordinal` 会进入：
+
+```text
+parent-1
+child-1-0
+child-1-1
+```
+
+重复 ordinal 会造成 local ID 和父子引用冲突，因此直接失败，而不是静默覆盖。
+
+随后判断块类型。`HEADING` 被跳过；PARAGRAPH、LIST 和当前 Generic 回退下的 TABLE 会继续处理。
+
+#### 第二步：生成 Parent
+
+`_format_parent_content` 得到：
+
+```text
+标题：大会员 > 自动续费
+正文：大会员会自动续费。用户可以在支付渠道关闭续费。
+```
+
+对应：
+
+```text
+local_id = parent-1
+kind = parent
+parent_local_id = None
+```
+
+Parent 保留完整 SourceBlock，不承担第一阶段精确召回。
+
+#### 第三步：切分正文
+
+`_split_content` 先统一 Windows/Unix 换行，然后按标点或换行得到自然句子：
+
+```text
+大会员会自动续费。
+用户可以在支付渠道关闭续费。
+```
+
+`_pack_sentences` 尽量把相邻短句放进同一 Child 正文，但不会超过 `child_max_chars`。
+
+如果某一个句子本身已经超过上限，才进入 `_split_oversized_sentence`：
+
+```text
+step = child_max_chars - child_overlap_chars
+```
+
+初始化时强制 `overlap < max`，保证 `step > 0`，从契约上避免滑窗死循环。
+
+#### 第四步：生成 Child
+
+`_format_child_content` 把标题压缩成检索前缀：
+
+```text
+大会员 / 自动续费：用户可以在支付渠道关闭续费。
+```
+
+对应：
+
+```text
+local_id = child-1-0
+kind = child
+parent_local_id = parent-1
+```
+
+标题前缀不计入 `child_max_chars`。上限约束的是正文预算，否则长标题会让不同章节的正文可用长度
+忽大忽小。
+
+#### 第五步：继承追溯信息
+
+Parent 和 Child 都保存：
+
+```json
+{
+  "heading_path": ["大会员", "自动续费"],
+  "page_number": 2,
+  "source_block_type": "paragraph",
+  "source_metadata": {},
+  "body_char_count": 25
+}
+```
+
+`source_metadata` 使用独立命名空间，防止 Loader 自定义字段覆盖 `page_number` 等系统字段。
+
+### 7.11 阅读代码的推荐顺序
+
+1. 先读 `ChunkDraft` 的 `validate_parent_reference`，理解合法父子关系；
+2. 再读 `GenericChunkStrategy.__init__`，理解窗口参数为什么快速失败；
+3. 阅读 `chunk` 主循环，只观察“跳过标题 → Parent → Child”的顺序；
+4. 阅读 `_split_content` 和 `_pack_sentences`，理解自然边界优先；
+5. 最后读 `_split_oversized_sentence`，手算一次 `max=5, overlap=2`；
+6. 对照 `tests/unit/test_knowledge_chunking.py` 的短段落、自然句和超长句样例。
+
+手算超长句 `abcdefghijk`：
+
+```text
+max = 5
+overlap = 2
+step = 3
+
+start=0  → abcde
+start=3  → defgh
+start=6  → ghijk
+```
+
+这能直观看出 overlap 只用于保留退化窗口的边界上下文。
+
+### 7.12 从上传文件到分块的完整阅读路径
+
+必须先区分当前真实链路与目标链路：
+
+```text
+当前已接通：上传 → 原文件存储 → Loader → SourceBlock → MySQL
+当前可独立调用：SourceBlock → GenericChunkStrategy → ChunkDraft
+5B-3待接通：入库任务自动调用Strategy → KnowledgeChunk
+第6周待实现：Child Embedding → 向量数据库 → 检索
+```
+
+#### 流程图
+
+```mermaid
+flowchart TD
+    A["管理员上传 PDF / DOCX / MD / TXT"] --> B["POST /api/v1/knowledge/documents"]
+    B --> C["鉴权、业务域、大小校验"]
+    C --> D["KnowledgeIngestionService.upload"]
+    D --> E["计算 SHA-256"]
+    E --> F{"同一 Document 内哈希已存在？"}
+    F -- "是" --> G["返回已有 Version / Job<br/>deduplicated=true"]
+    F -- "否" --> H["创建 Document 或新 Version"]
+    H --> I["创建 queued IngestionJob"]
+    I --> J["LocalKnowledgeFileStore 保存原文件"]
+    J --> K["提交事务 A"]
+    K --> L["_process(job_id)"]
+    L --> M["Job → processing<br/>attempt_count + 1"]
+    M --> N["事务外读取原文件"]
+    N --> O["DocumentLoaderRegistry 按扩展名选 Loader"]
+    O --> P{"解析是否成功？"}
+    P -- "否" --> Q["Version / Job → failed<br/>保存稳定 error_code"]
+    P -- "是" --> R["LoadedDocument + LoadedSourceBlock"]
+    R --> S["清理该 Version 的旧 SourceBlock"]
+    S --> T["写入 knowledge_source_blocks"]
+    T --> U["Version → ready<br/>Job → succeeded"]
+    U --> V["返回文档、版本、任务和 block_count"]
+    T -. "5B-3 接线点，当前尚未自动调用" .-> W["Generic / 专用 ChunkStrategy"]
+    W --> X["Parent / Child ChunkDraft"]
+    X -. "5B-3" .-> Y["knowledge_chunks"]
+    Y -. "第6周" .-> Z["Child Embedding 与向量索引"]
+```
+
+#### 按一次真实请求阅读
+
+**第零站：应用装配**
+
+从 `main.py::create_app` 开始，但只看 `knowledge_service` 的构造：
+
+```text
+Database
+LoaderRegistry
+LocalKnowledgeFileStore
+max_file_bytes
+    ↓
+KnowledgeIngestionService
+```
+
+这里体现依赖注入：Service 不在内部创建 MySQL、Loader 或文件存储，所以测试可以替换数据库根目
+录，生产环境也可以把本地存储替换为 OSS/S3。
+
+**第一站：HTTP 入口**
+
+进入 `api/knowledge.py::upload_document`：
+
+```text
+authenticate → UserContext
+UploadFile → 上限+1字节
+business_domain → BusinessDomain枚举
+access_scope → 去空、去重
+    ↓
+service.upload(...)
+```
+
+API 层不计算哈希、不查询版本、不解析文件。
+
+**第二站：上传事务**
+
+进入 `services/knowledge.py::upload`：
+
+```text
+Path(filename).name        清理客户端路径
+len(content)               空文件和大小校验
+sha256(content)            计算字节身份
+UserRepository             获取数据库用户
+active_document_by_identity 查逻辑Document
+version_by_hash            判断同Document内重复版本
+```
+
+三条分支：
+
+```text
+首次上传       → 新Document + Version v1 + Job
+相同字节重复传 → 直接返回v1，不重复存储和解析
+内容变化       → 原Document + Version v2 + 新Job
+```
+
+随后生成服务端 storage key，保存原文件并提交事务。到这里，即使解析进程随后崩溃，数据库中也已
+经存在一个可恢复的 queued Job。
+
+**第三站：解析任务**
+
+继续进入 `services/knowledge.py::_process`。不要一次读完整个方法，按三段看：
+
+```text
+第一段事务：Job → processing
+事务外工作：read → registry.load
+第二段事务：replace SourceBlock → ready/succeeded
+```
+
+当前 `_process` 是同步 Mock 调度，所以上传请求会等待解析结束。商业化异步版本只需把
+`await self._process(job_id)` 换成发布 `job_id`，Worker 继续复用 `_process` 边界。
+
+**第四站：原文件读取**
+
+进入 `knowledge/storage.py`：
+
+```text
+build_key → ab/完整版本ID.pdf
+write     → 先.tmp后replace
+read      → 只允许知识根目录内的key
+```
+
+数据库保存的是 `storage_key`，不是直接把 PDF 二进制存进 MySQL。
+
+**第五站：选择 Loader**
+
+进入 `loaders/base.py::DocumentLoaderRegistry.load`：
+
+```text
+.pdf  → PdfLoader
+.docx → DocxLoader
+.md   → MarkdownLoader
+.txt  → TextLoader
+```
+
+扩展名决定候选 Loader，具体 Loader 再验证 PDF/ZIP 等签名。已知错误保留稳定错误码，未知第三方
+异常统一转换为 `DOCUMENT_PARSE_FAILED`。
+
+**第六站：格式解析**
+
+根据你上传的文件只读对应 Loader。例如上传 Markdown，只需要进入
+`MarkdownLoader.load`，观察：
+
+```text
+#标题       → HEADING
+空行段落    → PARAGRAPH
+Markdown表格 → TABLE
+heading_path 随后续正文继承
+```
+
+输出统一变成 `LoadedDocument`，Service 从此不再关心原文件格式。
+
+**第七站：SourceBlock 持久化**
+
+回到 `_process` 的第二段事务：
+
+```text
+delete_blocks(version.id)
+LoadedSourceBlock
+    ↓ 字段映射
+KnowledgeSourceBlock
+    ↓
+repository.add_blocks
+```
+
+先删除旧块是为了失败重试时不会留下半套或重复解析结果。随后 Version 和 Job 一起成功。
+
+**第八站：当前响应结束**
+
+`service.job` 调用 `_view`，聚合：
+
+```text
+KnowledgeDocumentView
+KnowledgeVersionView
+job_id / job_status / attempt_count
+block_count / error_code / deduplicated
+```
+
+这就是当前 API 真正结束的位置。
+
+**第九站：手动进入5B算法**
+
+从数据库取出的 `KnowledgeSourceBlock` 需要先转换回算法输入，或在解析完成时直接使用
+`loaded.blocks`：
+
+```python
+drafts = GenericChunkStrategy().chunk(blocks=loaded.blocks)
+```
+
+然后按 `ChunkDraft.local_id` 建立 Parent UUID 映射并写入 `knowledge_chunks`。这一段尚未接入
+`_process`，属于 5B-3；因此当前上传后 `knowledge_chunks` 仍然是 0 行，这是预期行为。
+
+## 8. 5B-2 专用知识分块策略（已完成）
+
+下一步不再修改 Generic 主流程，而是在相同 `ChunkStrategy` 契约下实现：
+
+- Policy：按条款、适用条件、例外和处罚边界组织 Parent/Child；
+- Manual：按操作目标、前置条件和连续步骤组织；
+- FAQ：问题和同义问作为 Child，完整问答作为 Parent；
+- Table：表头与单行作为 Child，整表或相关行组作为 Parent；
+- StrategySelector：先处理 TABLE 覆盖规则，再按 `DocumentKnowledgeType` 选择策略。
+
+### 8.1 为什么 Generic 不够
+
+Generic 只知道长度和自然句边界，不理解业务结构。例如：
+
+```text
+第二条 退款条件
+用户在重复扣费时可以申请退款。
+但已经消耗的会员权益不支持退款。
+```
+
+如果仅按长度切分，例外条件“但已经消耗……”可能进入另一个 Child。检索命中“可以退款”后返回
+的内容缺少例外，就可能让客服给出错误承诺。
+
+专用策略的目标不是单纯让 Chunk 更短，而是把以下内容绑定在一起：
+
+```text
+结论 + 条件 + 例外 + 适用范围
+```
+
+### 8.2 代码放在哪里
+
+为避免 `chunking.py` 变成一个巨大文件，使用：
+
+```text
+src/bili_support/knowledge/chunking.py
+    公共契约、Generic和公共切分工具
+
+src/bili_support/knowledge/chunk_strategies.py
+    PolicyChunkStrategy
+    ManualChunkStrategy
+    FaqChunkStrategy
+    TableChunkStrategy
+    StrategySelector
+```
+
+本步骤仍然保持纯算法，不访问 Repository、MySQL 或向量数据库。
+
+### 8.3 四种策略的最小样例
+
+#### Policy
+
+输入：
+
+```text
+标题：大会员退款规则
+正文：重复扣费可以申请退款。但已经消耗的会员权益不支持退款。
+```
+
+期望：
+
+```text
+Parent：标题 + 完整规则 + 例外
+Child：大会员退款规则：重复扣费可以申请退款；例外：已消耗权益不支持退款。
+```
+
+核心要求：Child 可以精简，但不得把允许条件与否定例外拆散。
+
+#### Manual
+
+输入：
+
+```text
+关闭自动续费
+1. 打开支付渠道。
+2. 找到自动扣款服务。
+3. 选择哔哩哔哩并关闭服务。
+```
+
+期望：
+
+```text
+Parent：操作目标 + 完整连续步骤
+Child 1：关闭自动续费 / 步骤1：打开支付渠道。
+Child 2：关闭自动续费 / 步骤2：找到自动扣款服务。前置步骤：打开支付渠道。
+Child 3：关闭自动续费 / 步骤3：关闭服务。前置步骤：找到自动扣款服务。
+```
+
+核心要求：Child 可以按步骤召回，但必须带操作目标和必要前置步骤。
+
+#### FAQ
+
+输入：
+
+```text
+问：大会员可以退款吗？
+答：重复扣费可以申请退款，已经消耗的会员权益不支持退款。
+```
+
+期望：
+
+```text
+Parent：完整问题 + 完整答案
+Child：大会员可以退款吗？重复扣费退款条件
+```
+
+核心要求：问题和常见同义表达适合检索，完整答案适合返回模型。
+
+第一版不调用大模型生成同义问，只使用原始问题和确定性规则。5C 再评估是否值得用模型扩展问题。
+
+#### Table
+
+5A 已把表格规范化为：
+
+```text
+第1行：套餐=月卡；价格=25元
+第2行：套餐=年卡；价格=168元
+```
+
+期望：
+
+```text
+Parent：标题路径 + 完整表格
+Child 1：标题路径：套餐=月卡；价格=25元
+Child 2：标题路径：套餐=年卡；价格=168元
+```
+
+核心要求：每个 Child 都重复表头语义，不能只剩“月卡，25元”。
+
+### 8.4 StrategySelector 的边界
+
+选择过程应为：
+
+```python
+strategy = selector.select(DocumentKnowledgeType.POLICY)
+chunks = strategy.chunk(blocks=blocks)
+```
+
+但一份 Policy 文档内部可能有 TABLE，因此专用文档策略处理 blocks 时，需要把 TABLE 块委托给
+`TableChunkStrategy`，其余块再按 Policy 规则处理。
+
+不要设计成：
+
+```python
+DocumentKnowledgeType.TABLE
+```
+
+因为“表格”不是整份文档的业务知识类型。
+
+### 8.5 实施顺序
+
+本任务按一个整体完成，但代码建议按以下顺序写：
+
+1. `TableChunkStrategy`：输入结构最稳定，先建立专用策略样板；
+2. `FaqChunkStrategy`：建立问答 Parent/Child 差异；
+3. `ManualChunkStrategy`：处理步骤和前置上下文；
+4. `PolicyChunkStrategy`：最后处理条件、例外和条款组合；
+5. `StrategySelector`：统一选择，并保留 Generic 作为回退。
+
+### 8.6 当前第一个实现目标
+
+先完成 `TableChunkStrategy`。输入一个 `SourceBlockType.TABLE`：
+
+```text
+第1行：套餐=月卡；价格=25元
+第2行：套餐=年卡；价格=168元
+```
+
+输出必须满足：
+
+```text
+1个Parent：包含标题和完整两行
+2个Child：每行一个
+每个Child.parent_local_id指向同一个Parent
+页码、heading_path、source_metadata继续继承
+非TABLE输入快速失败，不能静默按普通段落处理
+```
+
+实现完成后再继续 FAQ、Manual 和 Policy，不需要现在考虑数据库写入。
+
+### 8.7 实际实现结果
+
+实现文件：
+
+```text
+src/bili_support/knowledge/chunk_strategies.py
+```
+
+包含：
+
+```text
+TableChunkStrategy
+FaqChunkStrategy
+ManualChunkStrategy
+PolicyChunkStrategy
+StrategySelector
+_TableAwareStrategy
+```
+
+公共 `ChunkDraft`、`ChunkKind`、`DocumentKnowledgeType` 和 Generic 仍保留在 `chunking.py`。
+
+### 8.8 StrategySelector 的实际调用链
+
+```python
+strategy = StrategySelector().select(DocumentKnowledgeType.POLICY)
+drafts = strategy.chunk(blocks=loaded.blocks)
+```
+
+返回的不是裸 `PolicyChunkStrategy`，而是 `_TableAwareStrategy` 包装器：
+
+```text
+按SourceBlock原顺序扫描
+  ↓
+连续非TABLE块 → PolicyChunkStrategy
+连续TABLE块   → TableChunkStrategy
+  ↓
+合并ChunkDraft结果
+```
+
+因此一份政策 Markdown：
+
+```text
+HEADING
+PARAGRAPH
+TABLE
+```
+
+会同时得到：
+
+```text
+policy-parent / policy-child
+table-parent / table-child
+```
+
+不会因为文档类型是 POLICY 就把表格当普通段落切分。
+
+### 8.9 四个策略如何阅读
+
+#### 先读 Table
+
+入口：`TableChunkStrategy.chunk`
+
+```text
+验证所有输入都是TABLE
+  ↓
+按换行取得规范化数据行
+  ↓
+去除“第N行：”展示前缀
+  ↓
+完整表格生成Parent
+  ↓
+每行生成Child
+```
+
+Parent 保留原始规范化表格；Child 去掉行号但保留 `套餐=月卡；价格=25元` 的列语义。
+
+#### 再读 FAQ
+
+入口：`FaqChunkStrategy.chunk`
+
+支持两种确定性格式：
+
+```text
+格式一：
+问：……
+答：……
+
+格式二：
+标题：如何关闭自动续费？
+下一段：完整答案
+```
+
+识别成功生成一个问答 Parent 和一个问题 Child；无法识别的普通段落交给 Generic，保证知识不会被
+静默丢弃。当前不调用大模型生成同义问，效果扩展留给5C评估。
+
+#### 再读 Manual
+
+入口：`ManualChunkStrategy.chunk`
+
+先按连续 `heading_path` 形成操作章节，然后识别：
+
+```text
+1. 步骤
+2、步骤
+第3步 步骤
+- 列表步骤
+Word LIST块
+```
+
+Parent 保存完整章节。每个 Child 保存：
+
+```text
+操作目标
+当前步骤
+章节说明
+前置步骤（从第二步开始）
+```
+
+这让用户只问“下一步做什么”时，召回结果仍带有操作目标和必要前置上下文。
+
+#### 最后读 Policy
+
+入口：`PolicyChunkStrategy.chunk`
+
+先按标题路径形成政策章节，再按句子产生语义单元。以下前缀被视为例外或限制：
+
+```text
+但、但是、不过、除非、例外、不适用、不得、不支持
+```
+
+例外句不会独立成为 Child，而是追加到前一个结论：
+
+```text
+重复扣费可以申请退款。
++ 但已消耗权益不支持退款。
+  ↓
+一个policy-child
+```
+
+元数据 `contains_exception=true`，方便5C单独评估高风险例外是否被保留。
+
+### 8.10 回退和失败原则
+
+```text
+结构识别成功 → 专用策略
+普通未识别正文 → Generic回退
+TABLE交给非Table策略 → 快速失败
+Table输入不是TABLE → 快速失败
+```
+
+回退避免知识丢失，快速失败避免把已经明确的表格悄悄按普通文本处理。
+
+### 8.11 当前已知边界
+
+- FAQ 只识别确定性问答格式，尚未生成同义问；
+- Manual 依赖编号、项目符号或 Word LIST，复杂流程图尚未支持；
+- Policy 使用规则词识别例外，不理解隐含否定和跨段法律指代；
+- Table 当前按单行生成 Child，超大表格尚未做相关行分组；
+- 上述限制会在5C固定数据集上量化，不能只凭示例判断策略优劣。
+
+## 9. 当前任务：5B-3 持久化接入与 Small-to-Big
+
+5B-1/5B-2 当前都只产生内存中的 `ChunkDraft`。下一步把它们接入真实入库链路：
+
+```text
+LoadedSourceBlock
+  ↓ StrategySelector
+ChunkDraft(local_id)
+  ↓ Parent local_id → 数据库UUID映射
+KnowledgeChunk
+  ↓
+批量写入knowledge_chunks
+```
+
+还需要实现反向扩大：
+
+```text
+命中Child ID
+  ↓
+批量读取parent_chunk_id
+  ↓ 去重且保持首次命中顺序
+Parent上下文
+```
+
+这一步仍不接向量数据库。它只保证未来无论 Child 来自 BM25 还是向量召回，都能稳定还原 Parent。
