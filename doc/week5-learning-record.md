@@ -285,7 +285,7 @@ knowledge_documents          1 行：逻辑文档
 knowledge_document_versions  1 行：文件 v1
 knowledge_ingestion_jobs     1 行：succeeded
 knowledge_source_blocks      N 行：标题、段落、表格等
-knowledge_chunks             0 行：5B 尚未执行分块
+knowledge_chunks             M 行：5B生成的Parent和Child
 ```
 
 相同文件再次上传：
@@ -403,7 +403,7 @@ SourceBlockType
 src/bili_support/knowledge/chunking.py
 ```
 
-Small-to-Big 暂时不要写，等 5B-3 再进入：
+Small-to-Big 在 5B-3 实现于：
 
 ```text
 src/bili_support/knowledge/small_to_big.py
@@ -756,12 +756,11 @@ start=6  → ghijk
 
 ### 7.12 从上传文件到分块的完整阅读路径
 
-必须先区分当前真实链路与目标链路：
+当前真实链路已经贯通到Parent回溯：
 
 ```text
-当前已接通：上传 → 原文件存储 → Loader → SourceBlock → MySQL
-当前可独立调用：SourceBlock → GenericChunkStrategy → ChunkDraft
-5B-3待接通：入库任务自动调用Strategy → KnowledgeChunk
+当前已接通：上传 → 原文件存储 → Loader → SourceBlock → Strategy → KnowledgeChunk
+当前已接通：Child命中 → 批量查询Child → Parent去重保序 → 批量查询Parent
 第6周待实现：Child Embedding → 向量数据库 → 检索
 ```
 
@@ -786,13 +785,13 @@ flowchart TD
     O --> P{"解析是否成功？"}
     P -- "否" --> Q["Version / Job → failed<br/>保存稳定 error_code"]
     P -- "是" --> R["LoadedDocument + LoadedSourceBlock"]
-    R --> S["清理该 Version 的旧 SourceBlock"]
-    S --> T["写入 knowledge_source_blocks"]
-    T --> U["Version → ready<br/>Job → succeeded"]
-    U --> V["返回文档、版本、任务和 block_count"]
-    T -. "5B-3 接线点，当前尚未自动调用" .-> W["Generic / 专用 ChunkStrategy"]
+    R --> W["StrategySelector<br/>Generic / 专用 ChunkStrategy"]
     W --> X["Parent / Child ChunkDraft"]
-    X -. "5B-3" .-> Y["knowledge_chunks"]
+    X --> S["清理该 Version 的旧 Chunk / SourceBlock"]
+    S --> T["写入 knowledge_source_blocks"]
+    T --> Y["Parent先写、Child后写<br/>knowledge_chunks"]
+    Y --> U["Version → ready<br/>Job → succeeded"]
+    U --> V["返回文档、版本、任务、block_count和chunk_count"]
     Y -. "第6周" .-> Z["Child Embedding 与向量索引"]
 ```
 
@@ -932,9 +931,9 @@ job_id / job_status / attempt_count
 block_count / error_code / deduplicated
 ```
 
-这就是当前 API 真正结束的位置。
+这一步返回入库结果；分块检查和Small-to-Big回溯由后续管理接口继续。
 
-**第九站：手动进入5B算法**
+**第九站：自动进入5B算法**
 
 从数据库取出的 `KnowledgeSourceBlock` 需要先转换回算法输入，或在解析完成时直接使用
 `loaded.blocks`：
@@ -943,8 +942,9 @@ block_count / error_code / deduplicated
 drafts = GenericChunkStrategy().chunk(blocks=loaded.blocks)
 ```
 
-然后按 `ChunkDraft.local_id` 建立 Parent UUID 映射并写入 `knowledge_chunks`。这一段尚未接入
-`_process`，属于 5B-3；因此当前上传后 `knowledge_chunks` 仍然是 0 行，这是预期行为。
+然后 `_process` 按 `ChunkDraft.local_id` 建立 Parent UUID 映射并写入
+`knowledge_chunks`。成功任务的 `chunk_count` 必须大于0；旧版零Chunk数据可通过相同文件重传
+自动补建。
 
 ## 8. 5B-2 专用知识分块策略（已完成）
 
@@ -1205,20 +1205,46 @@ Parent 保留原始规范化表格；Child 去掉行号但保留 `套餐=月卡�
 
 入口：`FaqChunkStrategy.chunk`
 
-支持两种确定性格式：
+FAQ 不再用一个跨全文的贪婪正则，而是使用跨 SourceBlock 的逐行状态机。它同时支持：
 
 ```text
-格式一：
-问：……
-答：……
+Markdown：
+一个PARAGRAPH中连续出现多组Q/A/关键词
 
-格式二：
-标题：如何关闭自动续费？
-下一段：完整答案
+Word：
+Q、A、关键词分别位于多个PARAGRAPH
+
+标题问句：
+HEADING是问题，后续PARAGRAPH是答案
 ```
 
-识别成功生成一个问答 Parent 和一个问题 Child；无法识别的普通段落交给 Generic，保证知识不会被
-静默丢弃。当前不调用大模型生成同义问，效果扩展留给5C评估。
+状态流转：
+
+```text
+等待问题
+  ↓ Q：或问题Heading
+收集问题
+  ↓ A：或后续普通答案段落
+收集答案（允许多行/多段）
+  ↓ 关键词：
+解析关键词列表
+  ↓ 下一个Q或文件结束
+保存一组FaqRecord
+```
+
+例如一个 Markdown SourceBlock 内有10组FAQ，会生成10个 Parent 和10个 Child，不再让第一个答案
+吞掉后续9组。
+
+```text
+Parent：完整问题 + 完整答案
+Child：所属章节 + 问题 + 关键词
+metadata：question、keywords、faq_index、全部来源block ordinal
+```
+
+关键词支持使用 `、`、中英文逗号或分号分隔。重复关键词保持首次顺序并去重。
+
+无法识别的普通介绍段落交给 Generic，保证知识不会被静默丢弃；但显式写出 `Q：` 却没有答案时
+会快速失败，防止残缺FAQ进入数据库。当前不调用大模型生成同义问，效果扩展留给5C评估。
 
 #### 再读 Manual
 
@@ -1279,15 +1305,15 @@ Table输入不是TABLE → 快速失败
 
 ### 8.11 当前已知边界
 
-- FAQ 只识别确定性问答格式，尚未生成同义问；
+- FAQ 已支持 Markdown 单块多问答、Word 跨段问答和关键词，但尚未生成同义问；
 - Manual 依赖编号、项目符号或 Word LIST，复杂流程图尚未支持；
 - Policy 使用规则词识别例外，不理解隐含否定和跨段法律指代；
 - Table 当前按单行生成 Child，超大表格尚未做相关行分组；
 - 上述限制会在5C固定数据集上量化，不能只凭示例判断策略优劣。
 
-## 9. 当前任务：5B-3 持久化接入与 Small-to-Big
+## 9. 5B-3 持久化接入与 Small-to-Big（已完成）
 
-5B-1/5B-2 当前都只产生内存中的 `ChunkDraft`。下一步把它们接入真实入库链路：
+5B-1/5B-2 产生内存中的 `ChunkDraft`，5B-3 已把它们接入真实入库链路：
 
 ```text
 LoadedSourceBlock
@@ -1299,7 +1325,7 @@ KnowledgeChunk
 批量写入knowledge_chunks
 ```
 
-还需要实现反向扩大：
+反向扩大也已经完成：
 
 ```text
 命中Child ID
@@ -1310,3 +1336,435 @@ Parent上下文
 ```
 
 这一步仍不接向量数据库。它只保证未来无论 Child 来自 BM25 还是向量召回，都能稳定还原 Parent。
+
+### 9.1 Chunk 持久化接线（已完成）
+
+上传任务 `_process` 现在执行：
+
+```text
+Loader
+  → LoadedSourceBlock
+  → StrategySelector
+  → ChunkDraft
+  → SourceBlock ID映射
+  → Parent先写入
+  → Child写入并关联parent_chunk_id
+  → Version ready / Job succeeded
+```
+
+上传响应增加：
+
+```json
+{
+  "block_count": 203,
+  "chunk_count": 258
+}
+```
+
+只要任务成功，`chunk_count` 就不应再是0。
+
+### 9.2 综合Word文档使用mixed
+
+真实企业Word通常同时包含规则、操作步骤、FAQ和表格，因此新增：
+
+```text
+DocumentKnowledgeType.MIXED
+```
+
+`mixed` 根据标题路径把连续章节路由到：
+
+```text
+FAQ/常见问题                → FAQ
+开通方式/操作步骤/故障处理  → Manual
+退款/权益/有效期/规则       → Policy
+其他章节                    → Generic
+TABLE块                     → Table（始终最高优先级）
+```
+
+上传接口的 `knowledge_type` 默认值就是 `mixed`。
+
+### 9.3 旧版本自动补建Chunk
+
+5A时期上传成功的版本可能已经有 SourceBlock，但没有 Chunk。相同文件再次上传时，如果检测到：
+
+```text
+Job = succeeded
+block_count > 0
+chunk_count = 0
+```
+
+系统会复用原 Version 和 Job 重新执行分块，不会被 SHA-256 幂等直接挡住。
+
+### 9.4 上传后检查接口
+
+```http
+GET /api/v1/knowledge/versions/{version_id}/chunks
+GET /api/v1/knowledge/versions/{version_id}/chunks?kind=child
+GET /api/v1/knowledge/versions/{version_id}/chunks?kind=parent
+```
+
+FAQ Child 的 `metadata_json` 会包含：
+
+```json
+{
+  "strategy": "faq",
+  "question": "大会员开通后多久生效？",
+  "keywords": ["生效时间", "未到账", "支付成功"]
+}
+```
+
+### 9.5 Small-to-Big 反向扩大（已完成）
+
+核心文件：
+
+```text
+src/bili_support/knowledge/small_to_big.py
+```
+
+输入是一组有序Child命中：
+
+```json
+[
+  {"chunk_id": "child-a", "score": 0.82},
+  {"chunk_id": "child-c", "score": 0.79},
+  {"chunk_id": "child-b", "score": 0.91}
+]
+```
+
+假设 `child-a` 和 `child-b` 同属 `parent-1`，`child-c` 属于 `parent-2`，算法输出：
+
+```text
+parent-1：matched=[child-a, child-b]，best_score=0.91，first_rank=1
+parent-2：matched=[child-c]，best_score=0.79，first_rank=2
+```
+
+这里有三个关键规则：
+
+1. 一个Parent只返回一次，避免把重复上下文塞给大模型；
+2. Parent顺序取第一次Child命中的顺序，不能依赖数据库 `IN` 查询的返回顺序；
+3. 同一Parent保留全部命中Child ID和最高分，后续可用于解释、重排和评估。
+
+`score` 的统一契约是“越大越相关”。如果未来向量数据库返回的是距离（越小越近），必须在
+检索适配器中先转换，不能让Small-to-Big猜测不同检索器的分数方向。
+
+服务层执行两次批量查询，而不是在循环里逐条查询：
+
+```text
+Child命中列表
+  → 批量查询全部Child并校验版本、kind、parent_chunk_id
+  → SmallToBigExpander去重、保序、聚合分数
+  → 批量查询全部Parent
+  → 按算法计划组装完整Parent上下文
+```
+
+这避免了典型的 N+1 查询：命中50个Child也只需要一次Child查询和一次Parent查询。
+
+### 9.6 调试接口
+
+在第6周检索器接入前，可以手工模拟召回结果：
+
+```http
+POST /api/v1/knowledge/versions/{version_id}/chunks/expand
+Authorization: Bearer <API_TOKEN>
+X-User-ID: <上传文档时使用的用户ID>
+Content-Type: application/json
+```
+
+```json
+{
+  "hits": [
+    {"chunk_id": "<child-id-1>", "score": 0.91},
+    {"chunk_id": "<child-id-2>", "score": 0.84}
+  ]
+}
+```
+
+返回中的 `parent.content` 是未来交给大模型的完整上下文；`matched_child_ids` 是召回证据，
+`best_child_score` 是同一Parent下的最高Child分数，`first_child_rank` 是Parent首次出现的位置。
+
+接口会拒绝以下输入，防止跨版本或错误类型的Chunk混入回答上下文：
+
+- 不属于当前版本的Chunk；
+- 把Parent ID伪装成Child命中；
+- 没有 `parent_chunk_id` 的异常Child；
+- Parent关联已经损坏或类型错误。
+
+### 9.7 5B 完整代码阅读顺序
+
+不要按文件夹字母顺序阅读，按一条数据的生命周期阅读：
+
+```text
+1. knowledge/types.py
+   LoadedSourceBlock：Loader与Chunk层的输入契约
+        ↓
+2. knowledge/loaders.py
+   PDF/DOCX/MD/TXT → 统一SourceBlock
+        ↓
+3. knowledge/chunking.py
+   ChunkDraft、Parent/Child规则、Generic基线
+        ↓
+4. knowledge/chunk_strategies.py
+   Policy/Manual/FAQ/Table/Mixed专用语义边界
+        ↓
+5. services/knowledge.py::_process
+   local_id映射UUID，Parent先入库，Child再关联入库
+        ↓
+6. models/entities.py::KnowledgeChunk
+   数据库中的父子关系和追溯元数据
+        ↓
+7. repositories/knowledge.py::chunks_by_ids
+   按版本批量读取Child和Parent
+        ↓
+8. knowledge/small_to_big.py
+   Child命中去重、Parent保序、证据与分数聚合
+        ↓
+9. services/knowledge.py::expand_child_hits
+   权限校验 + 两次批量查询 + 输出组装
+        ↓
+10. api/knowledge.py::expand_child_hits
+    临时调试入口，未来由检索链路内部调用
+```
+
+### 9.8 5B 完成后的边界
+
+现在已经解决“知识如何表示”和“命中小块后如何恢复完整上下文”，但还没有解决“怎样命中”：
+
+```text
+已经完成：文件 → SourceBlock → Parent/Child → MySQL → Small-to-Big
+尚未开始：Embedding → 向量索引 → Top-K召回 → Recall@K评估
+```
+
+因此 5B 的调试接口需要手工传入Child ID和分数；进入5C后先建立固定Chunk评估集，
+第6周再让真实向量检索自动产生这些命中。
+
+## 10. 5C 固定数据集、评估与调试接口（已完成）
+
+### 10.1 5C 要回答的问题
+
+5B 已经能够“生成Chunk”，但仅看几个成功示例无法判断策略是否真的更好。5C 把问题改写成可重复
+验证的形式：
+
+```text
+同一批SourceBlock + 同一批人工语义期望
+            ↓
+generic_baseline 与 specialized 分别运行
+            ↓
+比较语义单元、Parent上下文、策略选择和追溯完整性
+            ↓
+失败定位到 case_id、来源文件和SourceBlock ordinal
+```
+
+5C 评价的是知识表示，不是检索。此时还没有Embedding、向量索引和查询，因此不能把这里的
+`child_semantic_recall` 称为 `Recall@K`。
+
+### 10.2 固定数据集
+
+数据文件：
+
+```text
+data/evaluation/chunk_dev_v1.jsonl
+```
+
+首版8条样本覆盖：
+
+| 样本 | 重点边界 |
+|---|---|
+| Word跨段FAQ | Q、A、关键词分属不同段落仍要组成一组知识 |
+| Markdown多FAQ | 一个文本块内两组问答不能被贪婪合并 |
+| Word列表步骤 | 后续步骤必须保留前置步骤 |
+| Markdown编号步骤 | 说明文本和步骤顺序都要保留 |
+| 跨块政策例外 | “但……”不能脱离前一个政策结论 |
+| Word表格 | 每一行必须携带列名语义 |
+| Mixed综合文档 | FAQ和Policy章节必须路由到不同策略 |
+| 无标点长文本 | Child有界切分，Parent保留完整正文 |
+
+每条样本都包含：
+
+```text
+case_id
+source_name
+knowledge_type
+blocks
+expected.child_term_groups
+expected.parent_term_groups
+expected.expected_child_strategies
+Parent/Child数量范围
+tags / note
+```
+
+`term_groups` 的含义不是“这些词在所有Chunk里出现过”，而是“这些词必须共同出现在同一个Chunk
+中”。例如政策结论和例外分别出现在两个Child里，从全文覆盖率看没有丢字，但检索只命中其中一个
+时仍可能产生错误回答，所以应判失败。
+
+### 10.3 两个比较策略
+
+```text
+generic_baseline
+    所有SourceBlock直接交给GenericChunkStrategy
+
+specialized
+    knowledge_type → StrategySelector
+    TABLE始终优先 → TableChunkStrategy
+    mixed按标题 → FAQ / Manual / Policy / Generic
+```
+
+Generic不是“错误实现”，而是对照组。没有基线就无法说明专用策略增加的复杂度是否真正换来了
+语义收益。
+
+### 10.4 评估指标
+
+| 指标 | 含义 |
+|---|---|
+| `case_pass_rate` | 一条样本的所有语义、结构和数量期望是否全部满足 |
+| `child_semantic_recall` | 应共同出现的检索语义组，有多少在同一个Child中出现 |
+| `parent_context_recall` | 回答所需的完整语义组，有多少在同一个Parent中出现 |
+| `strategy_match_rate` | FAQ/Manual/Policy/Table/Generic是否使用预期策略 |
+| `traceability_rate` | Chunk是否能定位SourceBlock，Child是否引用有效Parent |
+| `average_parent_count` | 观察上下文是否被过度拆散或过度合并 |
+| `average_child_count` | 观察候选数量和未来索引规模 |
+
+首版固定集结果：
+
+| 策略 | 样本通过率 | Child语义召回 | Parent上下文召回 | 策略匹配 | 追溯完整 |
+|---|---:|---:|---:|---:|---:|
+| generic_baseline | 12.50% | 50.00% | 60.00% | 11.11% | 100.00% |
+| specialized | 100.00% | 100.00% | 100.00% | 100.00% | 100.00% |
+
+这说明专用策略在当前结构边界上优于Generic，但不代表已经达到生产质量。数据集规模仍小，而且
+样本参与了策略开发，存在开发集过拟合风险；后续还需要真实文档扩展集和不参与调参的holdout集。
+
+### 10.5 失败分析如何定位
+
+每个失败保存：
+
+```text
+case_id
+source_name
+knowledge_type
+failure.category
+failure.expectation
+failure.observed
+failure.source_ordinals
+```
+
+失败类别包括：
+
+- `child_semantic_unit`：应放在同一个Child的语义被拆散；
+- `parent_context`：回答所需上下文没有共同进入一个Parent；
+- `strategy_selection`：标题或知识类型路由错误；
+- `parent_child_integrity`：来源或父子引用损坏；
+- `chunk_count`：过度合并或过度切碎；
+- `strategy_execution`：单个样本导致策略异常。
+
+评估器会把单样本策略异常记录为失败并继续运行其他样本，避免一条坏文档让整批报告消失。
+
+### 10.6 运行评估
+
+无需模型Key，也不会产生模型调用费用：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.chunk_cli
+```
+
+默认输出：
+
+```text
+data/evaluation/chunk_report_v1.md
+data/evaluation/chunk_report_v1.json
+```
+
+核心代码阅读顺序：
+
+```text
+evaluation/chunk_types.py
+  → 数据集、期望、失败、指标和报告契约
+evaluation/chunk_data.py
+  → JSONL加载、重复case_id和Schema校验
+evaluation/chunk_metrics.py
+  → 运行两种策略、逐项匹配、失败归因、指标聚合
+evaluation/chunk_report.py
+  → 策略对比表和可定位失败列表
+evaluation/chunk_cli.py
+  → 一键运行与Markdown/JSON输出
+```
+
+### 10.7 不落库调试接口
+
+```http
+POST /api/v1/knowledge/chunks/debug
+```
+
+请求直接提交 `knowledge_type` 和 `LoadedSourceBlock[]`。响应包含：
+
+```text
+chunks
+parent_count / child_count
+strategy_counts
+unrepresented_source_ordinals
+```
+
+这个接口适合以下循环：
+
+```text
+复制失败样本的SourceBlock
+  → 修改标题路径、块类型或正文
+  → 调用debug接口
+  → 查看Chunk和strategy_counts
+  → 确认方案后再修改正式策略
+  → 重跑固定评估集
+```
+
+它不创建Document、Version、Job或数据库Chunk，因此同一输入可以反复实验，不会污染正式知识库。
+
+### 10.8 为什么暂不使用Token长度
+
+当前Generic策略使用字符预算。中文字符与Token不是一一对应，不同Embedding模型和生成模型的
+Tokenizer也可能不同。此时使用“字符数除以某个常数”的伪Token估算会制造虚假精确度。
+
+合理顺序是：
+
+```text
+第5周：字符预算保证确定性结构实验
+第6周：确定Embedding模型和Tokenizer
+      → 统计真实Token分布
+      → 再校准child_max_chars或引入TokenLengthPolicy
+```
+
+### 10.9 思考题与答案
+
+#### 1. 为什么Child语义召回100%不等于检索Recall@K为100%？
+
+Child语义召回只检查“正确的语义是否被表示在某个Child中”；Recall@K还要求Embedding/BM25能
+根据用户问题把这个Child排进前K。前者是可检索性的必要条件，但不是检索成功的充分条件。
+
+#### 2. 为什么不能只检查原文字数覆盖率？
+
+字数覆盖率只能发现文本丢失，无法发现语义边界错误。政策结论和例外都被保留但分散到不同Chunk，
+字数覆盖仍是100%，回答却可能只看到结论而漏掉限制条件。
+
+#### 3. 为什么失败必须保存来源文件和SourceBlock ordinal？
+
+只知道指标下降无法修改策略。来源文件用于找到业务上下文，ordinal用于回到Loader输出定位是
+解析问题、标题路径问题还是Chunk策略问题。
+
+#### 4. 为什么专用策略100%仍不能直接宣布生产可用？
+
+当前只有8条针对性开发样本，并且它们参与了实现反馈。生产文档还包含错误格式、扫描PDF、合并
+单元格、隐含例外、超长FAQ和复杂流程图，需要扩大真实样本并建立独立holdout集。
+
+#### 5. 为什么调试接口不直接写数据库？
+
+调试需要反复修改同一输入。若每次实验都创建版本和Chunk，会污染正式数据、触发幂等和权限逻辑，
+也难以分辨算法结果与持久化状态。验证通过后再走正式上传链路更清晰。
+
+### 10.10 第5周完成边界
+
+```text
+已完成：
+文件解析 → SourceBlock → 专用Parent/Child → 持久化
+→ Small-to-Big → 固定数据集 → 策略比较 → 失败调试
+
+第6周开始：
+EmbeddingProvider → Child向量 → 索引版本 → Top-K
+→ 元数据过滤 → Small-to-Big → Recall@K
+```

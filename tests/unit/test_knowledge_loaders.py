@@ -4,6 +4,7 @@ import pymupdf
 from docx import Document
 
 from bili_support.knowledge.loaders import create_default_loader_registry
+from bili_support.knowledge.table_normalization import normalize_table
 from bili_support.knowledge.types import SourceBlockType
 
 
@@ -86,3 +87,10 @@ def test_text_loader_supports_gb18030_and_paragraph_boundaries() -> None:
     )
 
     assert [block.content for block in loaded.blocks] == ["第一段", "第二段"]
+
+
+def test_single_cell_word_callout_is_not_repeated_as_its_own_header() -> None:
+    normalized = normalize_table([["测试提示\n本文内容只用于解析测试。"]])
+
+    assert normalized == "第1行：测试提示=本文内容只用于解析测试。"
+    assert normalized.count("测试提示") == 1

@@ -96,6 +96,66 @@ def test_faq_strategy_pairs_question_heading_with_following_answer() -> None:
     assert chunks[1].parent_local_id == chunks[0].local_id
 
 
+def test_faq_strategy_parses_multiple_pairs_and_keywords_from_one_block() -> None:
+    chunks = FaqChunkStrategy().chunk(
+        blocks=(
+            _block(
+                "Q：大会员开通后多久生效？\n"
+                "A：支付成功后立即生效。\n"
+                "关键词：生效时间、未到账、支付成功\n"
+                "Q：开通大会员需要多少钱？\n"
+                "A：真实价格以结算页面为准。\n"
+                "关键词：价格、套餐、优惠",
+                ordinal=7,
+                heading_path=("客服FAQ",),
+            ),
+        )
+    )
+
+    first_parent, first_child, second_parent, second_child = chunks
+    assert first_parent.content == (
+        "问题：大会员开通后多久生效？\n答案：支付成功后立即生效。"
+    )
+    assert first_child.content == (
+        "客服FAQ：大会员开通后多久生效？\n关键词：生效时间、未到账、支付成功"
+    )
+    assert first_child.metadata["keywords"] == [
+        "生效时间",
+        "未到账",
+        "支付成功",
+    ]
+    assert second_parent.content == (
+        "问题：开通大会员需要多少钱？\n答案：真实价格以结算页面为准。"
+    )
+    assert second_child.metadata["keywords"] == ["价格", "套餐", "优惠"]
+    assert first_child.parent_local_id == first_parent.local_id
+    assert second_child.parent_local_id == second_parent.local_id
+
+
+def test_faq_strategy_parses_question_answer_keywords_across_blocks() -> None:
+    chunks = FaqChunkStrategy().chunk(
+        blocks=(
+            _block("Q：连续包月怎么取消？", ordinal=10),
+            _block("A：进入原支付渠道取消订阅。", ordinal=11),
+            _block("关键词：自动续费、取消订阅", ordinal=12),
+        )
+    )
+
+    parent, child = chunks
+    assert parent.content == (
+        "问题：连续包月怎么取消？\n答案：进入原支付渠道取消订阅。"
+    )
+    assert child.metadata["source_block_ordinals"] == [10, 11, 12]
+    assert child.metadata["keywords"] == ["自动续费", "取消订阅"]
+
+
+def test_explicit_faq_question_without_answer_fails() -> None:
+    with pytest.raises(ValueError, match="has no answer"):
+        FaqChunkStrategy().chunk(
+            blocks=(_block("Q：这个问题没有答案？", ordinal=13),)
+        )
+
+
 def test_manual_strategy_keeps_complete_steps_and_previous_step_context() -> None:
     chunks = ManualChunkStrategy().chunk(
         blocks=(

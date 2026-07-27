@@ -32,6 +32,7 @@ class DocumentKnowledgeType(StrEnum):
     MANUAL = "manual"  # 操作手册：重视步骤顺序和前置条件
     FAQ = "faq"  # 标准问答：问题适合Child，问答整体适合Parent
     GENERIC = "generic"  # 无明确模板的通用知识，使用自然句子边界
+    MIXED = "mixed"  # 综合手册：按章节在Policy/Manual/FAQ/Generic之间路由
 
 
 class ChunkDraft(BaseModel):
@@ -238,6 +239,7 @@ def _block_metadata(block: LoadedSourceBlock) -> dict[str, object]:
     """继承5A追溯字段，并把Loader专属元数据放入独立命名空间。"""
 
     return {
+        "strategy": "generic",
         "heading_path": list(block.heading_path),
         "page_number": block.page_number,
         "source_block_type": block.block_type.value,

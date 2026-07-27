@@ -2,15 +2,21 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 
 from bili_support.core.security import AuthDependency, UserContext
 from bili_support.intent.types import BusinessDomain
+from bili_support.knowledge.chunking import ChunkKind, DocumentKnowledgeType
 from bili_support.schemas.common import ApiResponse
 from bili_support.schemas.knowledge import (
+    ChunkDebugRequest,
+    ChunkDebugView,
+    KnowledgeChunkView,
     KnowledgeDocumentView,
     KnowledgeIngestionView,
     KnowledgeVersionView,
+    ParentChunkContextView,
+    SmallToBigExpansionRequest,
 )
 from bili_support.services.knowledge import KnowledgeIngestionService
 
@@ -34,6 +40,9 @@ def create_knowledge_router(
             file: Annotated[UploadFile, File()],
             title: Annotated[str, Form(min_length=1, max_length=200)],
             business_domain: Annotated[BusinessDomain, Form()],
+            knowledge_type: Annotated[DocumentKnowledgeType, Form()] = (
+                DocumentKnowledgeType.MIXED
+            ),
             access_scope: Annotated[str, Form()] = "public",
             document_id: Annotated[str | None, Form()] = None,
     ) -> ApiResponse[KnowledgeIngestionView]:
@@ -46,6 +55,7 @@ def create_knowledge_router(
             media_type=file.content_type or "application/octet-stream",
             title=title.strip(),
             business_domain=business_domain.value,
+            knowledge_type=knowledge_type,
             access_scope=_access_scope(access_scope),
             # 不传表示按标题/领域寻找逻辑文档；传入则明确给指定文档新增版本。
             document_id=document_id,
@@ -62,6 +72,68 @@ def create_knowledge_router(
     ) -> ApiResponse[list[KnowledgeDocumentView]]:
         return ApiResponse(
             data=await service.list_documents(actor=actor),
+            request_id=_request_id(request),
+        )
+
+    @router.get(
+        "/versions/{version_id}/chunks",
+        response_model=ApiResponse[list[KnowledgeChunkView]],
+    )
+    async def list_chunks(
+        version_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+        kind: Annotated[ChunkKind | None, Query()] = None,
+    ) -> ApiResponse[list[KnowledgeChunkView]]:
+        """查看分块内容；用于上传后检查FAQ、步骤、政策和表格解析效果。"""
+
+        return ApiResponse(
+            data=await service.chunks(
+                actor=actor,
+                version_id=version_id,
+                kind=kind.value if kind is not None else None,
+            ),
+            request_id=_request_id(request),
+        )
+
+    @router.post(
+        "/versions/{version_id}/chunks/expand",
+        response_model=ApiResponse[list[ParentChunkContextView]],
+    )
+    async def expand_child_hits(
+        version_id: str,
+        payload: SmallToBigExpansionRequest,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[list[ParentChunkContextView]]:
+        """模拟检索命中并观察Small-to-Big回溯结果；第6周将由检索器调用。"""
+
+        return ApiResponse(
+            data=await service.expand_child_hits(
+                actor=actor,
+                version_id=version_id,
+                hits=payload.hits,
+            ),
+            request_id=_request_id(request),
+        )
+
+    @router.post(
+        "/chunks/debug",
+        response_model=ApiResponse[ChunkDebugView],
+    )
+    async def debug_chunks(
+        payload: ChunkDebugRequest,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[ChunkDebugView]:
+        """不落库运行分块策略；actor只用于确保调试能力必须经过鉴权。"""
+
+        del actor
+        return ApiResponse(
+            data=service.debug_chunks(
+                knowledge_type=payload.knowledge_type,
+                blocks=payload.blocks,
+            ),
             request_id=_request_id(request),
         )
 

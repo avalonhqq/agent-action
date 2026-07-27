@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bili_support.models.entities import (
+    KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
     KnowledgeIngestionJob,
@@ -33,6 +34,9 @@ class KnowledgeRepository:
     def add_blocks(self, blocks: list[KnowledgeSourceBlock]) -> None:
         self._session.add_all(blocks)
 
+    def add_chunks(self, chunks: list[KnowledgeChunk]) -> None:
+        self._session.add_all(chunks)
+
     async def document(self, document_id: str) -> KnowledgeDocument | None:
         return await self._session.get(KnowledgeDocument, document_id)
 
@@ -42,6 +46,7 @@ class KnowledgeRepository:
             owner_user_id: str,
             title: str,
             business_domain: str,
+            knowledge_type: str,
     ) -> KnowledgeDocument | None:
         """按创建人、标题和业务域寻找同一个有效的逻辑文档。"""
 
@@ -52,6 +57,7 @@ class KnowledgeRepository:
                     KnowledgeDocument.created_by_user_id == owner_user_id,
                     KnowledgeDocument.title == title,
                     KnowledgeDocument.business_domain == business_domain,
+                    KnowledgeDocument.knowledge_type == knowledge_type,
                     KnowledgeDocument.status == "active",
                 )
             ),
@@ -144,6 +150,54 @@ class KnowledgeRepository:
             )
         )
         return int(count or 0)
+
+    async def chunk_count(self, version_id: str) -> int:
+        count = await self._session.scalar(
+            select(func.count(KnowledgeChunk.id)).where(
+                KnowledgeChunk.version_id == version_id
+            )
+        )
+        return int(count or 0)
+
+    async def list_chunks(
+        self,
+        version_id: str,
+        *,
+        kind: str | None = None,
+        limit: int = 500,
+    ) -> list[KnowledgeChunk]:
+        statement = select(KnowledgeChunk).where(
+            KnowledgeChunk.version_id == version_id
+        )
+        if kind is not None:
+            statement = statement.where(KnowledgeChunk.kind == kind)
+        result = await self._session.scalars(
+            statement.order_by(KnowledgeChunk.ordinal).limit(limit)
+        )
+        return list(result)
+
+    async def chunks_by_ids(
+        self,
+        *,
+        version_id: str,
+        chunk_ids: list[str],
+    ) -> list[KnowledgeChunk]:
+        """在同一版本内批量读取Chunk，调用方不能依赖数据库返回顺序。"""
+
+        if not chunk_ids:
+            return []
+        result = await self._session.scalars(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.version_id == version_id,
+                KnowledgeChunk.id.in_(chunk_ids),
+            )
+        )
+        return list(result)
+
+    async def delete_chunks(self, version_id: str) -> None:
+        await self._session.execute(
+            delete(KnowledgeChunk).where(KnowledgeChunk.version_id == version_id)
+        )
 
     async def delete_blocks(self, version_id: str) -> None:
         # 重试解析时先清理旧结果，确保同一版本不会残留半套或重复结构块。

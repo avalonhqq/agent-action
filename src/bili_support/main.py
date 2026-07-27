@@ -28,6 +28,7 @@ from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier
 from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
+from bili_support.knowledge.chunk_strategies import StrategySelector
 from bili_support.knowledge.loaders import create_default_loader_registry
 from bili_support.knowledge.storage import LocalKnowledgeFileStore
 from bili_support.llm.context import BoundedContextBuilder, StandaloneQueryRewriter
@@ -119,6 +120,7 @@ def create_app(
         database=current_database,
         # Loader 注册表封装文件类型差异，Service 始终只处理统一 LoadedDocument。
         loaders=create_default_loader_registry(),
+        chunk_strategies=StrategySelector(),
         # 当前使用本地文件系统；替换对象存储只需实现相同读写边界。
         file_store=LocalKnowledgeFileStore(
             Path(current_settings.knowledge_storage_dir)

@@ -95,11 +95,12 @@ CREATE TABLE IF NOT EXISTS `alembic_version` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 INSERT INTO `alembic_version` (`version_num`)
-VALUES ('20260725_0003')
+VALUES ('20260728_0004')
 ON DUPLICATE KEY UPDATE `version_num` = VALUES(`version_num`);
 
 -- 第五周知识入库表的完整约束和索引以 Alembic 迁移为唯一可信来源：
 -- migrations/versions/20260725_0003_week5_knowledge_ingestion.py
+-- knowledge_type 后续变更见 migrations/versions/20260728_0004_knowledge_type.py
 -- 请通过 `python -m alembic upgrade head` 创建，避免手工执行时漏掉外键或索引。
 
 CREATE TABLE IF NOT EXISTS `knowledge_documents` (
@@ -107,6 +108,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_documents` (
   `created_by_user_id` varchar(36) NOT NULL,
   `title` varchar(200) NOT NULL,
   `business_domain` varchar(32) NOT NULL,
+  `knowledge_type` varchar(16) NOT NULL DEFAULT 'mixed',
   `access_scope` json NOT NULL,
   `status` varchar(16) NOT NULL,
   `created_at` datetime NOT NULL,
@@ -117,7 +119,9 @@ CREATE TABLE IF NOT EXISTS `knowledge_documents` (
   CONSTRAINT `fk_knowledge_documents_user`
     FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `ck_knowledge_documents_status`
-    CHECK (`status` IN ('active', 'deleted'))
+    CHECK (`status` IN ('active', 'deleted')),
+  CONSTRAINT `ck_knowledge_documents_knowledge_type`
+    CHECK (`knowledge_type` IN ('policy', 'manual', 'faq', 'generic', 'mixed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `knowledge_document_versions` (

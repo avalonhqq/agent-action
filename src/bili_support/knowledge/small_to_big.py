@@ -1,6 +1,97 @@
-"""5B-3 Small-to-Big 入口，当前暂不实现。
+"""把精确命中的Child聚合为可供大模型阅读的Parent上下文。
 
-5B-1/5B-2 先保证 Parent/Child 生成正确；5B-3 再在本模块实现：
-
-Child 检索命中 → 按 parent_chunk_id 去重 → 批量读取 Parent → 保持相关性顺序返回。
+本模块只处理ID、分数和顺序，不访问数据库，也不知道命中来自BM25还是向量检索。
+数据库批量读取和资源权限校验由KnowledgeIngestionService负责。
 """
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from math import isfinite
+
+
+@dataclass(frozen=True, slots=True)
+class ChildChunkHit:
+    """一个检索器返回的Child命中；列表位置就是相关性排序。
+
+    score必须统一为“越大越相关”。如果底层向量库返回距离，检索适配器应先完成转换。
+    """
+
+    chunk_id: str
+    score: float
+
+    def __post_init__(self) -> None:
+        if not self.chunk_id.strip():
+            raise ValueError("child chunk id must not be blank")
+        if not isfinite(self.score):
+            raise ValueError("child hit score must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class ParentExpansionPlan:
+    """一个Parent的回溯计划，尚未携带数据库中的Parent正文。"""
+
+    parent_chunk_id: str
+    matched_child_ids: tuple[str, ...]
+    best_child_score: float
+    # 从1开始，便于直接展示和排查检索排序。
+    first_child_rank: int
+
+
+@dataclass(slots=True)
+class _MutableParentPlan:
+    """聚合过程中的内部可变状态，结束后会转换成不可变公开契约。"""
+
+    matched_child_ids: list[str]
+    best_child_score: float
+    first_child_rank: int
+
+
+class SmallToBigExpander:
+    """按首次Child命中顺序聚合Parent，同时保留父级下的命中证据。"""
+
+    def plan(
+        self,
+        *,
+        hits: Sequence[ChildChunkHit],
+        child_parent_ids: Mapping[str, str],
+    ) -> tuple[ParentExpansionPlan, ...]:
+        """生成批量读取Parent所需的稳定计划。
+
+        同一Child重复出现时只记录一次；同一Parent被多个Child命中时只返回一次。
+        Parent的顺序取它第一次被命中的位置，分数取所属Child命中的最高分。
+        """
+
+        mutable: dict[str, _MutableParentPlan] = {}
+        seen_child_ids: set[str] = set()
+        for rank, hit in enumerate(hits, start=1):
+            if hit.chunk_id in seen_child_ids:
+                continue
+            seen_child_ids.add(hit.chunk_id)
+
+            parent_id = child_parent_ids.get(hit.chunk_id)
+            if parent_id is None:
+                raise ValueError(f"child chunk has no resolved parent: {hit.chunk_id}")
+
+            current = mutable.get(parent_id)
+            if current is None:
+                mutable[parent_id] = _MutableParentPlan(
+                    matched_child_ids=[hit.chunk_id],
+                    best_child_score=hit.score,
+                    first_child_rank=rank,
+                )
+                continue
+
+            current.matched_child_ids.append(hit.chunk_id)
+            current.best_child_score = max(current.best_child_score, hit.score)
+
+        return tuple(
+            ParentExpansionPlan(
+                parent_chunk_id=parent_id,
+                matched_child_ids=tuple(values.matched_child_ids),
+                best_child_score=values.best_child_score,
+                first_child_rank=values.first_child_rank,
+            )
+            for parent_id, values in mutable.items()
+        )

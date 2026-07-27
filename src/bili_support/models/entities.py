@@ -105,6 +105,10 @@ class KnowledgeDocument(TimestampMixin, Base):
     __tablename__ = "knowledge_documents"
     __table_args__ = (
         CheckConstraint("status IN ('active', 'deleted')", name="status_allowed"),
+        CheckConstraint(
+            "knowledge_type IN ('policy', 'manual', 'faq', 'generic', 'mixed')",
+            name="knowledge_type_allowed",
+        ),
         Index("ix_knowledge_documents_domain_status", "business_domain", "status"),
     )
 
@@ -116,6 +120,8 @@ class KnowledgeDocument(TimestampMixin, Base):
     # title + business_domain + created_by_user_id 是当前逻辑文档身份。
     title: Mapped[str] = mapped_column(String(200))
     business_domain: Mapped[str] = mapped_column(String(32), index=True)
+    # mixed用于同时包含规则、步骤、FAQ和表格的综合企业文档。
+    knowledge_type: Mapped[str] = mapped_column(String(16), default="mixed")
     # 5A 先保存权限标签，真正检索时还必须再次执行权限过滤。
     access_scope: Mapped[list[str]] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="active")

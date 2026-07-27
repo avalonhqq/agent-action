@@ -1,3 +1,7 @@
+from io import BytesIO
+
+from docx import Document
+
 from bili_support.knowledge import (
     ChunkKind,
     DocumentKnowledgeType,
@@ -62,3 +66,34 @@ def test_markdown_policy_with_table_uses_document_and_table_strategies() -> None
         chunk for chunk in chunks if chunk.local_id.startswith("policy-child-")
     )
     assert "但已消耗权益不支持退款" in policy_child.content
+
+
+def test_docx_paragraphs_can_form_multiple_faq_records() -> None:
+    document = Document()
+    document.add_heading("客服FAQ", level=1)
+    document.add_paragraph("Q：大会员开通后多久生效？")
+    document.add_paragraph("A：支付成功后立即生效。")
+    document.add_paragraph("关键词：生效时间、未到账")
+    document.add_paragraph("Q：连续包月怎么取消？")
+    document.add_paragraph("A：进入原支付渠道取消订阅。")
+    document.add_paragraph("关键词：自动续费、取消订阅")
+    buffer = BytesIO()
+    document.save(buffer)
+
+    loaded = create_default_loader_registry().load(
+        content=buffer.getvalue(),
+        filename="customer-faq.docx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+    )
+    chunks = StrategySelector().select(DocumentKnowledgeType.FAQ).chunk(
+        blocks=loaded.blocks
+    )
+
+    parents = [chunk for chunk in chunks if chunk.kind is ChunkKind.PARENT]
+    children = [chunk for chunk in chunks if chunk.kind is ChunkKind.CHILD]
+    assert len(parents) == 2
+    assert len(children) == 2
+    assert children[0].metadata["keywords"] == ["生效时间", "未到账"]
+    assert children[1].metadata["keywords"] == ["自动续费", "取消订阅"]

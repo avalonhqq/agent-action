@@ -319,6 +319,9 @@ X-User-Name: 演示用户
 | POST | `/api/v1/knowledge/documents` | 上传并解析 PDF、DOCX、Markdown 或 TXT |
 | GET | `/api/v1/knowledge/documents` | 查询当前用户创建的有效文档 |
 | GET | `/api/v1/knowledge/documents/{document_id}/versions` | 查询文档版本 |
+| GET | `/api/v1/knowledge/versions/{version_id}/chunks` | 检查 Parent/Child 分块，可用 `kind=child` 过滤 |
+| POST | `/api/v1/knowledge/versions/{version_id}/chunks/expand` | 模拟Child召回并批量还原去重后的Parent上下文 |
+| POST | `/api/v1/knowledge/chunks/debug` | 不落库运行SourceBlock分块实验并返回诊断 |
 | GET | `/api/v1/knowledge/jobs/{job_id}` | 查询解析状态、错误码和结构块数量 |
 | POST | `/api/v1/knowledge/jobs/{job_id}/retry` | 重试失败任务 |
 | DELETE | `/api/v1/knowledge/documents/{document_id}` | 软删除文档 |
@@ -332,6 +335,7 @@ curl.exe -X POST http://127.0.0.1:8010/api/v1/knowledge/documents `
   -F "file=@.\data\knowledge\membership.md" `
   -F "title=大会员规则" `
   -F "business_domain=membership" `
+  -F "knowledge_type=mixed" `
   -F "access_scope=public"
 ```
 
@@ -342,6 +346,35 @@ curl.exe -X POST http://127.0.0.1:8010/api/v1/knowledge/documents `
 BILI_SUPPORT_KNOWLEDGE_STORAGE_DIR=./data/knowledge/files
 BILI_SUPPORT_KNOWLEDGE_MAX_FILE_BYTES=10485760
 ```
+
+`knowledge_type` 可选 `policy`、`manual`、`faq`、`generic` 或 `mixed`。综合 Word 手册通常同时
+包含规则、步骤、FAQ 和表格，应使用默认的 `mixed`。上传响应中的 `chunk_count` 应大于 0；
+随后用 Chunk 查询接口检查 `metadata_json.strategy` 和 FAQ `keywords`。
+
+### 固定 Chunk 评估
+
+评估集位于 `data/evaluation/chunk_dev_v1.jsonl`，覆盖 Word/Markdown FAQ、操作步骤、跨块政策
+例外、表格行、Mixed 路由和无标点长文本。运行：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.chunk_cli
+```
+
+也可以在安装项目后使用：
+
+```powershell
+bili-chunk-eval
+```
+
+报告默认生成到：
+
+```text
+data/evaluation/chunk_report_v1.md
+data/evaluation/chunk_report_v1.json
+```
+
+该评估比较 `generic_baseline` 和 `specialized` 的 Child 语义单元、Parent 上下文、策略匹配和
+父子追溯质量。它不调用模型、不产生费用，也不代表第6周向量检索的 Recall@K。
 
 ## 可选：接入 OpenAI-compatible 服务
 

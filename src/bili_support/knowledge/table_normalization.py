@@ -17,6 +17,10 @@ def normalize_table(rows: Sequence[Sequence[str | None]]) -> str:
     width = max(len(row) for row in cleaned)
     # 不规则表格补齐为空字符串，使每列始终与同一个表头对应。
     padded = [row + [""] * (width - len(row)) for row in cleaned]
+    if len(padded) == 1:
+        # 单行表无法证明该行是“表头”。尤其Word常用1x1表格制作提示框，
+        # 旧逻辑会把同一单元格同时当表头和数据，产生“全文=全文”的重复内容。
+        return _normalize_single_row(padded[0])
     raw_headers = padded[0]
     headers = [
         header or f"第{index + 1}列"
@@ -35,3 +39,17 @@ def normalize_table(rows: Sequence[Sequence[str | None]]) -> str:
         if cells:
             lines.append(f"第{row_index}行：" + "；".join(cells))
     return "\n".join(lines)
+
+
+def _normalize_single_row(row: Sequence[str]) -> str:
+    if len(row) == 1:
+        lines = [line.strip() for line in row[0].splitlines() if line.strip()]
+        if len(lines) >= 2:
+            return f"第1行：{lines[0]}=" + "\n".join(lines[1:])
+        return f"第1行：内容={row[0]}"
+    cells = [
+        f"第{index + 1}列={value}"
+        for index, value in enumerate(row)
+        if value
+    ]
+    return "第1行：" + "；".join(cells)
