@@ -286,9 +286,10 @@ class MixedDocumentChunkStrategy:
             if block.block_type is SourceBlockType.TABLE:
                 raise ValueError("TABLE blocks must be delegated to TableChunkStrategy")
             selected_type = _section_knowledge_type(block.heading_path)
-            if current_type is not None and selected_type is not current_type:
+            effective_type = selected_type or DocumentKnowledgeType.GENERIC
+            if current_type is not None and effective_type is not current_type:
                 flush()
-            current_type = selected_type
+            current_type = effective_type
             current.append(block)
         flush()
         return tuple(drafts)
