@@ -27,6 +27,8 @@ class ChunkEvaluator:
     """运行确定性分块并输出语义、上下文、策略和追溯四类指标。"""
 
     def __init__(self, *, selector: StrategySelector | None = None) -> None:
+        """允许测试或未来实验注入另一版Selector，默认使用生产分块策略。"""
+
         self._selector = selector or StrategySelector()
 
     def evaluate(
@@ -39,6 +41,8 @@ class ChunkEvaluator:
             ChunkEvaluationMode.SPECIALIZED,
         ),
     ) -> ChunkEvaluationReport:
+        """让每个模式运行完全相同的Case，再组合成可比较报告。"""
+
         if not cases:
             raise ValueError("chunk evaluation requires at least one case")
         if not modes:
@@ -59,6 +63,8 @@ class ChunkEvaluator:
         mode: ChunkEvaluationMode,
         cases: tuple[ChunkEvaluationCase, ...],
     ) -> ChunkStrategyEvaluation:
+        """运行单一模式并将逐Case计数聚合为全数据集指标。"""
+
         results = tuple(
             self._evaluate_case(
                 case=case,
@@ -78,6 +84,8 @@ class ChunkEvaluator:
         mode: ChunkEvaluationMode,
         case: ChunkEvaluationCase,
     ) -> ChunkStrategy:
+        """基线固定使用Generic；实验组遵循Case声明的knowledge_type。"""
+
         if mode is ChunkEvaluationMode.GENERIC_BASELINE:
             return GenericChunkStrategy()
         return self._selector.select(case.knowledge_type)
@@ -88,9 +96,12 @@ class ChunkEvaluator:
         case: ChunkEvaluationCase,
         strategy: ChunkStrategy,
     ) -> ChunkCaseEvaluation:
+        """运行一条Case，并按语义、策略、关系和数量四层归因。"""
+
         try:
             chunks = strategy.chunk(blocks=case.blocks)
         except ValueError as exc:
+            # 坏文档或策略边界错误只影响当前Case，批量评估必须继续处理其余样本。
             source_ordinals = tuple(block.ordinal for block in case.blocks)
             return ChunkCaseEvaluation(
                 case_id=case.case_id,
@@ -121,6 +132,7 @@ class ChunkEvaluator:
                     ),
                 ),
             )
+        # Parent和Child职责不同，必须分开匹配人工期望，不能用全部Chunk混合计分。
         parents = tuple(chunk for chunk in chunks if chunk.kind is ChunkKind.PARENT)
         children = tuple(chunk for chunk in chunks if chunk.kind is ChunkKind.CHILD)
         failures: list[ChunkEvaluationFailure] = []
@@ -141,6 +153,7 @@ class ChunkEvaluator:
             source_ordinals=source_ordinals,
         )
 
+        # 一个mixed Case可能同时期望faq和policy，所以这里使用集合而非单一策略值。
         child_strategies = {
             str(chunk.metadata.get("strategy", "")) for chunk in children
         }
@@ -158,6 +171,7 @@ class ChunkEvaluator:
                     )
                 )
 
+        # 即使语义匹配，也必须验证来源和父子关系，否则线上无法引用或Small-to-Big。
         traceable_count, integrity_failures = _check_integrity(
             chunks=chunks,
             source_ordinals=set(source_ordinals),
@@ -208,6 +222,12 @@ def _term_group_pass_count(
     category: ChunkFailureCategory,
     source_ordinals: tuple[int, ...],
 ) -> int:
+    """计算“组内所有术语出现在同一Chunk”的期望通过数。
+
+    这里有意不做模糊匹配或Embedding相似度：5C金标准检查确定性结构边界，
+    语义检索能力留到第6周Recall@K评估。
+    """
+
     passed = 0
     for terms in term_groups:
         if any(all(term in chunk.content for term in terms) for chunk in chunks):
@@ -229,6 +249,8 @@ def _check_integrity(
     chunks: tuple[ChunkDraft, ...],
     source_ordinals: set[int],
 ) -> tuple[int, list[ChunkEvaluationFailure]]:
+    """验证Chunk能回到当前Case的SourceBlock，且Child引用同批有效Parent。"""
+
     parent_ids = {
         chunk.local_id for chunk in chunks if chunk.kind is ChunkKind.PARENT
     }
@@ -266,6 +288,8 @@ def _check_count_range(
     source_ordinals: tuple[int, ...],
     failures: list[ChunkEvaluationFailure],
 ) -> None:
+    """把过度合并/切碎转换为统一CHUNK_COUNT失败。"""
+
     if actual >= minimum and (maximum is None or actual <= maximum):
         return
     upper = "∞" if maximum is None else str(maximum)
@@ -282,6 +306,8 @@ def _check_count_range(
 def _aggregate_metrics(
     results: tuple[ChunkCaseEvaluation, ...],
 ) -> ChunkEvaluationMetrics:
+    """用全量分子/分母计算micro指标，并保留每Case平均规模。"""
+
     total_chunks = sum(len(item.chunks) for item in results)
     return ChunkEvaluationMetrics(
         case_pass_rate=_ratio(sum(item.passed for item in results), len(results)),
@@ -307,9 +333,13 @@ def _aggregate_metrics(
 
 
 def _ratio(numerator: int, denominator: int) -> float:
+    """无期望项时返回1，含义是“没有该维度的失败”，避免除零。"""
+
     return numerator / denominator if denominator else 1.0
 
 
 def _chunk_preview(chunks: Iterable[ChunkDraft]) -> str:
+    """限制失败报告体积，只展示前三个Chunk各80字符。"""
+
     values = [chunk.content.replace("\n", " ")[:80] for chunk in chunks]
     return " | ".join(values[:3]) or "无Chunk"

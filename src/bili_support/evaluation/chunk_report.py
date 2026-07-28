@@ -4,6 +4,9 @@ from bili_support.evaluation.chunk_types import ChunkEvaluationReport
 
 
 def render_chunk_evaluation_markdown(report: ChunkEvaluationReport) -> str:
+    """先输出策略横向指标，再逐策略列出可定位的失败明细。"""
+
+    # 报告顶部只放最适合横向比较的聚合指标，避免读者先陷入单条Chunk细节。
     lines = [
         "# BiliSupport Chunk 评估报告",
         "",
@@ -20,6 +23,7 @@ def render_chunk_evaluation_markdown(report: ChunkEvaluationReport) -> str:
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for strategy in report.strategies:
+        # 每个strategy占一行，使Generic与专用策略的收益可以直接对照。
         metrics = strategy.metrics
         lines.append(
             f"| {strategy.mode.value} | {_percent(metrics.case_pass_rate)} "
@@ -32,6 +36,7 @@ def render_chunk_evaluation_markdown(report: ChunkEvaluationReport) -> str:
         )
 
     for strategy in report.strategies:
+        # 明细只展示失败Case；完整成功输出仍保留在JSON报告的cases/chunks中。
         failed = tuple(case for case in strategy.cases if not case.passed)
         lines.extend(
             [
@@ -51,6 +56,7 @@ def render_chunk_evaluation_markdown(report: ChunkEvaluationReport) -> str:
         )
         for case in failed:
             for failure in case.failures:
+                # 一个Case可能同时存在语义、策略和数量失败，每个失败独占一行。
                 lines.append(
                     f"| {case.case_id} | {_escape(case.source_name)} "
                     f"| {case.knowledge_type.value} | {failure.category.value} "
@@ -62,8 +68,12 @@ def render_chunk_evaluation_markdown(report: ChunkEvaluationReport) -> str:
 
 
 def _percent(value: float) -> str:
+    """统一百分比精度，避免同一报告出现不一致的小数位。"""
+
     return f"{value * 100:.2f}%"
 
 
 def _escape(value: str) -> str:
+    """转义Markdown表格分隔符，并把多行Chunk压成单行预览。"""
+
     return value.replace("|", "\\|").replace("\n", " ")

@@ -1768,3 +1768,37 @@ Child语义召回只检查“正确的语义是否被表示在某个Child中”�
 EmbeddingProvider → Child向量 → 索引版本 → Top-K
 → 元数据过滤 → Small-to-Big → Recall@K
 ```
+
+### 10.11 代码注释阅读入口
+
+知识表示和5C评估代码已经补齐中文模块说明、类说明、字段说明、方法说明和关键算法分支说明。
+阅读注释时重点区分以下类型层级：
+
+```text
+knowledge/types.py
+  LoadedSourceBlock / LoadedDocument
+  含义：Loader忠实恢复的原文结构，不是检索Chunk
+
+knowledge/chunking.py
+  ChunkKind / DocumentKnowledgeType / ChunkDraft / ChunkStrategy
+  含义：纯算法分块契约，local_id尚未映射数据库UUID
+
+knowledge/small_to_big.py
+  ChildChunkHit / ParentExpansionPlan
+  含义：检索命中与Parent批量回溯计划，不负责数据库查询
+
+schemas/knowledge.py
+  Knowledge*View / ChunkDebug* / SmallToBig*
+  含义：HTTP边界的请求响应类型，不直接暴露ORM对象
+
+evaluation/chunk_types.py
+  ChunkExpectation / ChunkEvaluationCase / Failure / Metrics / Report
+  含义：固定数据集金标准、逐样本结果和聚合报告契约
+```
+
+注释采用以下原则：
+
+- 字段注释说明“谁产生、谁消费、为什么需要”，而不只是翻译变量名；
+- 算法注释集中解释去重、保序、异常隔离、micro聚合等不直观决策；
+- 显而易见的赋值和循环不逐行重复描述，避免注释噪声；
+- 类型约束与中文注释同时保留，注释帮助理解，Pydantic/mypy负责机器校验。

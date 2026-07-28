@@ -15,6 +15,8 @@ from bili_support.evaluation.chunk_types import ChunkEvaluationMode
 
 
 def create_argument_parser() -> argparse.ArgumentParser:
+    """定义可重复实验参数；默认值对应仓库内首版固定数据集。"""
+
     parser = argparse.ArgumentParser(description="BiliSupport Chunk离线评估")
     parser.add_argument(
         "--dataset",
@@ -36,13 +38,17 @@ def create_argument_parser() -> argparse.ArgumentParser:
 
 
 def run_cli(arguments: argparse.Namespace) -> int:
+    """加载、评估并同时写出人读Markdown与机器读JSON报告。"""
+
     try:
+        # 先完整校验数据集，避免用部分坏数据生成具有误导性的指标。
         cases = load_chunk_evaluation_cases(arguments.dataset)
         report = ChunkEvaluator().evaluate(
             dataset_name=arguments.dataset.name,
             cases=cases,
             modes=tuple(ChunkEvaluationMode(value) for value in arguments.modes),
         )
+        # 同一output_prefix保证两种报告是同一次运行的配套产物。
         markdown_path = arguments.output_prefix.with_suffix(".md")
         json_path = arguments.output_prefix.with_suffix(".json")
         markdown_path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,6 +58,7 @@ def run_cli(arguments: argparse.Namespace) -> int:
         )
         json_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     except (ChunkDatasetError, OSError, ValueError) as exc:
+        # CLI边界只输出安全摘要；异常链由开发调试环境处理，不写入报告。
         print(f"Chunk评估失败：{exc}")
         return 2
 
@@ -61,6 +68,8 @@ def run_cli(arguments: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    """项目脚本入口，返回非零退出码供本地脚本或CI识别失败。"""
+
     raise SystemExit(run_cli(create_argument_parser().parse_args()))
 
 

@@ -42,6 +42,8 @@ def normalize_table(rows: Sequence[Sequence[str | None]]) -> str:
 
 
 def _normalize_single_row(row: Sequence[str]) -> str:
+    """处理提示框和无表头单行表，避免产生“全文=全文”的重复语义。"""
+
     if len(row) == 1:
         lines = [line.strip() for line in row[0].splitlines() if line.strip()]
         if len(lines) >= 2:

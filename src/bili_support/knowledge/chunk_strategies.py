@@ -70,6 +70,8 @@ class TableChunkStrategy:
             *,
             blocks: tuple[LoadedSourceBlock, ...],
     ) -> tuple[ChunkDraft, ...]:
+        """验证TABLE输入，生成一个整表Parent和每行一个自包含Child。"""
+
         drafts: list[ChunkDraft] = []
         for block in blocks:
             if block.block_type is not SourceBlockType.TABLE:
@@ -115,6 +117,8 @@ class FaqChunkStrategy:
     """跨Markdown单块或Word多段落解析多组Q/A/关键词。"""
 
     def __init__(self, *, fallback: ChunkStrategy | None = None) -> None:
+        """注入无法识别为Q/A的普通文本回退策略。"""
+
         self._fallback = fallback or GenericChunkStrategy()
 
     def chunk(
@@ -122,6 +126,8 @@ class FaqChunkStrategy:
             *,
             blocks: tuple[LoadedSourceBlock, ...],
     ) -> tuple[ChunkDraft, ...]:
+        """先恢复FAQ记录，再把未消费普通段落交给fallback避免知识丢失。"""
+
         records, fallback_blocks = _parse_faq_records(blocks)
         drafts = [
             draft
@@ -137,6 +143,8 @@ class ManualChunkStrategy:
     """按操作章节组织Parent，并为每个步骤补充目标和前置步骤。"""
 
     def __init__(self, *, fallback: ChunkStrategy | None = None) -> None:
+        """注入没有识别出步骤时使用的安全回退策略。"""
+
         self._fallback = fallback or GenericChunkStrategy()
 
     def chunk(
@@ -144,6 +152,8 @@ class ManualChunkStrategy:
             *,
             blocks: tuple[LoadedSourceBlock, ...],
     ) -> tuple[ChunkDraft, ...]:
+        """按标题章节聚合步骤，并让每个后续Child携带直接前置步骤。"""
+
         drafts: list[ChunkDraft] = []
         for group in _content_groups(blocks):
             steps, descriptions = _manual_steps(group)
@@ -197,6 +207,8 @@ class PolicyChunkStrategy:
     """按政策章节生成Parent，并把例外条款绑定到前一个结论Child。"""
 
     def __init__(self, *, fallback: ChunkStrategy | None = None) -> None:
+        """注入无法形成政策语义单元时使用的安全回退策略。"""
+
         self._fallback = fallback or GenericChunkStrategy()
 
     def chunk(
@@ -204,6 +216,8 @@ class PolicyChunkStrategy:
             *,
             blocks: tuple[LoadedSourceBlock, ...],
     ) -> tuple[ChunkDraft, ...]:
+        """按章节形成完整Parent，并把例外片段合并进前一结论Child。"""
+
         drafts: list[ChunkDraft] = []
         for group in _content_groups(blocks):
             semantic_units = _policy_units(group)
@@ -257,6 +271,8 @@ class MixedDocumentChunkStrategy:
         manual: ChunkStrategy | None = None,
         faq: ChunkStrategy | None = None,
     ) -> None:
+        """建立章节知识类型到具体策略的映射，并共享同一个Generic回退。"""
+
         generic_strategy = generic or GenericChunkStrategy()
         self._strategies: dict[DocumentKnowledgeType, ChunkStrategy] = {
             DocumentKnowledgeType.GENERIC: generic_strategy,
@@ -272,11 +288,15 @@ class MixedDocumentChunkStrategy:
         *,
         blocks: tuple[LoadedSourceBlock, ...],
     ) -> tuple[ChunkDraft, ...]:
+        """按连续章节类型分组，保证不同类型的内容不会被送入同一次策略调用。"""
+
         drafts: list[ChunkDraft] = []
         current: list[LoadedSourceBlock] = []
         current_type: DocumentKnowledgeType | None = None
 
         def flush() -> None:
+            """把当前连续章节交给已选策略，并清空缓冲区。"""
+
             if not current or current_type is None:
                 return
             drafts.extend(self._strategies[current_type].chunk(blocks=tuple(current)))
@@ -307,6 +327,8 @@ class StrategySelector:
             faq: ChunkStrategy | None = None,
             table: ChunkStrategy | None = None,
     ) -> None:
+        """装配可替换策略；默认组合对应当前生产分块版本。"""
+
         generic_strategy = generic or GenericChunkStrategy()
         self._strategies: dict[DocumentKnowledgeType, ChunkStrategy] = {
             DocumentKnowledgeType.GENERIC: generic_strategy,
@@ -342,6 +364,8 @@ class _TableAwareStrategy:
             document_strategy: ChunkStrategy,
             table_strategy: ChunkStrategy,
     ) -> None:
+        """保存普通文档策略和表格策略，调用时再按块类型切换。"""
+
         self._document_strategy = document_strategy
         self._table_strategy = table_strategy
 
@@ -350,11 +374,15 @@ class _TableAwareStrategy:
             *,
             blocks: tuple[LoadedSourceBlock, ...],
     ) -> tuple[ChunkDraft, ...]:
+        """保持原顺序切分连续TABLE/非TABLE区间并合并各策略输出。"""
+
         drafts: list[ChunkDraft] = []
         current: list[LoadedSourceBlock] = []
         current_is_table: bool | None = None
 
         def flush() -> None:
+            """使用当前区间类型对应的策略消费缓冲区。"""
+
             if not current:
                 return
             strategy = self._table_strategy if current_is_table else self._document_strategy
@@ -396,10 +424,14 @@ def _parse_faq_records(
     heading_path: tuple[str, ...] = ()
 
     def remember_source(block: LoadedSourceBlock) -> None:
+        """按ordinal去重记录一组FAQ实际消费过的SourceBlock。"""
+
         if all(existing.ordinal != block.ordinal for existing in source_blocks):
             source_blocks.append(block)
 
     def flush() -> None:
+        """完成当前FAQ记录，并清空状态机以接收下一个问题。"""
+
         nonlocal question, heading_path
         if question is None:
             return
@@ -493,6 +525,8 @@ def _faq_record_drafts(
     *,
     record_index: int,
 ) -> tuple[ChunkDraft, ChunkDraft]:
+    """把一条已恢复FAQ转换成“完整问答Parent + 问题关键词Child”。"""
+
     first = record.source_blocks[0]
     parent_id = f"faq-parent-{first.ordinal}-{record_index}"
     metadata = {
@@ -540,6 +574,8 @@ def _faq_context_path(record: _FaqRecord) -> tuple[str, ...]:
 
 
 def _parse_keywords(value: str) -> list[str]:
+    """兼容中英文逗号、顿号和分号，返回去空白关键词。"""
+
     return [
         keyword.strip()
         for keyword in _FAQ_KEYWORD_SEPARATOR.split(value)
@@ -548,6 +584,8 @@ def _parse_keywords(value: str) -> list[str]:
 
 
 def _looks_like_question(value: str) -> bool:
+    """用显式Q前缀、问号和常见疑问词判断Heading是否可作为FAQ问题。"""
+
     normalized = _strip_question_label(value)
     return (
             value.strip().startswith(("问：", "问:", "Q:", "Q："))
@@ -559,6 +597,8 @@ def _looks_like_question(value: str) -> bool:
 
 
 def _strip_question_label(value: str) -> str:
+    """删除问题开头的Q:/问：标签，保留真正问题文本。"""
+
     return re.sub(r"^\s*(?:问|Q)[：:]\s*", "", value, flags=re.IGNORECASE).strip()
 
 
@@ -588,6 +628,8 @@ def _content_groups(
 def _manual_steps(
         group: tuple[LoadedSourceBlock, ...],
 ) -> tuple[list[tuple[int, str]], list[str]]:
+    """从LIST或编号/项目符号行提取步骤，其余行保留为流程说明。"""
+
     steps: list[tuple[int, str]] = []
     descriptions: list[str] = []
     for block in group:
@@ -612,6 +654,8 @@ def _manual_steps(
 def _policy_units(
         group: tuple[LoadedSourceBlock, ...],
 ) -> list[tuple[int, str]]:
+    """按句子拆政策内容，并将“但/除非”等例外追加到前一语义单元。"""
+
     units: list[tuple[int, str]] = []
     for block in group:
         fragments = [
@@ -629,11 +673,15 @@ def _policy_units(
 
 
 def _contains_exception(value: str) -> bool:
+    """判断完整语义单元中是否包含任一例外/否定标记。"""
+
     normalized = value.strip()
     return any(marker in normalized for marker in _POLICY_EXCEPTION_PREFIXES)
 
 
 def _is_exception_fragment(value: str) -> bool:
+    """判断当前短句是否以例外标记开头，需要绑定前一政策结论。"""
+
     normalized = value.strip()
     return normalized.startswith(_POLICY_EXCEPTION_PREFIXES)
 
@@ -641,6 +689,8 @@ def _is_exception_fragment(value: str) -> bool:
 def _section_knowledge_type(
     heading_path: tuple[str, ...],
 ) -> DocumentKnowledgeType:
+    """根据完整标题路径中的业务标记选择Mixed章节策略。"""
+
     heading = " / ".join(heading_path).casefold()
     if any(marker in heading for marker in _FAQ_SECTION_MARKERS):
         return DocumentKnowledgeType.FAQ
@@ -652,6 +702,8 @@ def _section_knowledge_type(
 
 
 def _metadata(block: LoadedSourceBlock, *, strategy: str) -> dict[str, object]:
+    """构造单块策略通用元数据，并隔离Loader私有metadata。"""
+
     return {
         "strategy": strategy,
         "heading_path": list(block.heading_path),
@@ -666,6 +718,8 @@ def _group_metadata(
         *,
         strategy: str,
 ) -> dict[str, object]:
+    """构造跨块语义组元数据，保留全部ordinal和去重页码。"""
+
     first = group[0]
     return {
         **_metadata(first, strategy=strategy),
@@ -681,6 +735,8 @@ def _group_metadata(
 
 
 def _parent_text(block: LoadedSourceBlock, *, label: str) -> str:
+    """使用指定业务标签格式化单SourceBlock Parent。"""
+
     return _section_parent_text(block.heading_path, label, block.content)
 
 
@@ -689,6 +745,8 @@ def _section_parent_text(
         label: str,
         content: str,
 ) -> str:
+    """为跨块章节Parent补充完整标题路径和内容类型标签。"""
+
     heading = " > ".join(heading_path)
     if heading:
         return f"标题：{heading}\n{label}：{content}"
@@ -696,10 +754,14 @@ def _section_parent_text(
 
 
 def _child_text(block: LoadedSourceBlock, body: str) -> str:
+    """为单块Child添加标题路径前缀。"""
+
     return _heading_prefix(block.heading_path, body)
 
 
 def _heading_prefix(heading_path: tuple[str, ...], body: str) -> str:
+    """用紧凑斜杠标题增强检索文本；无标题时保持正文原样。"""
+
     heading = " / ".join(heading_path)
     if heading:
         return f"{heading}：{body}"

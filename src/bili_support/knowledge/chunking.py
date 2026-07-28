@@ -36,17 +36,25 @@ class DocumentKnowledgeType(StrEnum):
 
 
 class ChunkDraft(BaseModel):
-    """尚未持久化的分块结果，是算法层与数据库层之间的稳定契约。"""
+    """尚未持久化的分块结果，是算法层与数据库层之间的稳定契约。
+
+    Draft刻意不包含数据库UUID、Embedding或索引ID，使策略能在单元测试、离线评估和
+    debug接口中独立运行；入库Service之后才把local_id映射成KnowledgeChunk.id。
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     # local_id只在本次分块结果内唯一，5B-3持久化时再映射为数据库UUID。
     local_id: str = Field(min_length=1)
+    # Parent用于生成上下文，Child用于BM25/向量召回；两者不能混用索引职责。
     kind: ChunkKind
+    # Parent保存完整语境，Child保存自包含且紧凑的检索文本。
     content: str = Field(min_length=1)
+    # 主来源SourceBlock ordinal；跨块合并的完整来源另存metadata.source_block_ordinals。
     source_block_ordinal: int = Field(ge=0)
     # Parent没有父引用；Child必须指向同批结果中的一个Parent。
     parent_local_id: str | None = None
+    # 保存strategy、heading_path、page_number、keywords等可扩展追溯信息。
     metadata: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("local_id", "content")
@@ -83,13 +91,19 @@ class ChunkDraft(BaseModel):
 
 
 class ChunkStrategy(Protocol):
-    """所有分块策略都接收相同SourceBlock，并返回相同ChunkDraft。"""
+    """所有分块策略都接收相同SourceBlock，并返回相同ChunkDraft。
+
+    Protocol表达结构化依赖，不要求策略继承共同基类；测试替身或新策略只要实现chunk即可注入。
+    """
 
     def chunk(
             self,
             *,
             blocks: tuple[LoadedSourceBlock, ...],
-    ) -> tuple[ChunkDraft, ...]: ...
+    ) -> tuple[ChunkDraft, ...]:
+        """把有序SourceBlock转换成同批次内父子引用完整的ChunkDraft。"""
+
+        ...
 
 
 class GenericChunkStrategy:
@@ -101,6 +115,8 @@ class GenericChunkStrategy:
             child_max_chars: int = 160,
             child_overlap_chars: int = 20,
     ) -> None:
+        """配置Child正文字符上限，以及超长单句滑窗的重叠字符数。"""
+
         if child_max_chars <= 0:
             raise ValueError("child_max_chars must be greater than zero")
         if child_overlap_chars < 0:
