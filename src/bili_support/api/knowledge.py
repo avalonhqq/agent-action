@@ -13,21 +13,48 @@ from bili_support.schemas.knowledge import (
     ChunkDebugView,
     KnowledgeChunkView,
     KnowledgeDocumentView,
+    KnowledgeIndexingView,
+    KnowledgeIndexVersionView,
     KnowledgeIngestionView,
+    KnowledgeRetrievalRequest,
+    KnowledgeRetrievalView,
     KnowledgeVersionView,
     ParentChunkContextView,
     SmallToBigExpansionRequest,
 )
+from bili_support.services.indexing import KnowledgeIndexingService
 from bili_support.services.knowledge import KnowledgeIngestionService
+from bili_support.services.retrieval import KnowledgeRetrievalService
 
 
 def create_knowledge_router(
         service: KnowledgeIngestionService,
+        indexing_service: KnowledgeIndexingService,
+        retrieval_service: KnowledgeRetrievalService,
         authenticate: AuthDependency,
 ) -> APIRouter:
     """通过依赖注入绑定 Service 和鉴权，路由本身不直接访问数据库。"""
 
     router = APIRouter(prefix="/api/v1/knowledge", tags=["knowledge"])
+
+    @router.post(
+        "/retrieve",
+        response_model=ApiResponse[KnowledgeRetrievalView],
+    )
+    async def retrieve_knowledge(
+        payload: KnowledgeRetrievalRequest,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[KnowledgeRetrievalView]:
+        """独立观察Rewrite、Milvus Child召回、MySQL复核和Parent还原。"""
+
+        return ApiResponse(
+            data=await retrieval_service.retrieve(
+                actor=actor,
+                request=payload,
+            ),
+            request_id=_request_id(request),
+        )
 
     @router.post(
         "/documents",
@@ -92,6 +119,45 @@ def create_knowledge_router(
                 actor=actor,
                 version_id=version_id,
                 kind=kind.value if kind is not None else None,
+            ),
+            request_id=_request_id(request),
+        )
+
+    @router.post(
+        "/versions/{version_id}/indexes",
+        response_model=ApiResponse[KnowledgeIndexingView],
+        status_code=201,
+    )
+    async def build_vector_index(
+        version_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[KnowledgeIndexingView]:
+        """为ready知识版本构建Child向量；相同配置重复请求会幂等复用。"""
+
+        return ApiResponse(
+            data=await indexing_service.build(
+                actor=actor,
+                document_version_id=version_id,
+            ),
+            request_id=_request_id(request),
+        )
+
+    @router.get(
+        "/versions/{version_id}/indexes",
+        response_model=ApiResponse[list[KnowledgeIndexVersionView]],
+    )
+    async def list_vector_indexes(
+        version_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[list[KnowledgeIndexVersionView]]:
+        """查看知识版本的索引构建历史和当前状态。"""
+
+        return ApiResponse(
+            data=await indexing_service.list_versions(
+                actor=actor,
+                document_version_id=version_id,
             ),
             request_id=_request_id(request),
         )
@@ -176,6 +242,34 @@ def create_knowledge_router(
     ) -> ApiResponse[KnowledgeIngestionView]:
         return ApiResponse(
             data=await service.retry(actor=actor, job_id=job_id),
+            request_id=_request_id(request),
+        )
+
+    @router.get(
+        "/index-jobs/{job_id}",
+        response_model=ApiResponse[KnowledgeIndexingView],
+    )
+    async def index_job_status(
+        job_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[KnowledgeIndexingView]:
+        return ApiResponse(
+            data=await indexing_service.job(actor=actor, job_id=job_id),
+            request_id=_request_id(request),
+        )
+
+    @router.post(
+        "/index-jobs/{job_id}/retry",
+        response_model=ApiResponse[KnowledgeIndexingView],
+    )
+    async def retry_index_job(
+        job_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[KnowledgeIndexingView]:
+        return ApiResponse(
+            data=await indexing_service.retry(actor=actor, job_id=job_id),
             request_id=_request_id(request),
         )
 

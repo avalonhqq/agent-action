@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from bili_support.intent.types import BusinessDomain
 from bili_support.knowledge.chunking import ChunkDraft, DocumentKnowledgeType
 from bili_support.knowledge.types import LoadedSourceBlock
+from bili_support.llm.context import QueryRewriteResult
+from bili_support.llm.types import ChatMessage
 
 
 class KnowledgeDocumentView(BaseModel):
@@ -55,6 +58,119 @@ class KnowledgeIngestionView(BaseModel):
     chunk_count: int = Field(ge=0)  # 策略生成并持久化的Parent+Child总数
     deduplicated: bool  # 是否复用了同SHA-256版本
     error_code: str | None = None  # 稳定错误码，不向客户端泄露异常栈
+
+
+class KnowledgeIndexVersionView(BaseModel):
+    """逻辑向量索引版本；活动状态决定检索器允许使用哪批Milvus记录。"""
+
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+
+    id: str  # 同时写入Milvus的index_version_id
+    document_version_id: str  # 被索引的不可变知识版本
+    collection_name: str  # 物理Collection Schema版本
+    embedding_provider: str  # mock/openai_compatible等Provider类型
+    embedding_model: str  # 生成文档向量的模型，查询必须使用相同模型
+    embedding_dimension: int  # Collection FLOAT_VECTOR维度
+    chunk_schema_version: str  # 生成向量输入的Chunk契约版本
+    build_key: str  # 相同内容与配置的构建幂等键
+    status: str  # building/active/superseded/failed
+    total_chunks: int = Field(ge=0)  # 本次应索引的Child总数
+    indexed_chunks: int = Field(ge=0)  # 已成功写入Milvus的Child数
+    created_at: datetime
+    activated_at: datetime | None
+    finished_at: datetime | None
+
+
+class KnowledgeIndexingView(BaseModel):
+    """索引版本与当前构建任务的聚合视图。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    index: KnowledgeIndexVersionView
+    job_id: str
+    job_status: str  # queued/processing/succeeded/failed
+    attempt_count: int = Field(ge=0)
+    deduplicated: bool  # 是否复用了相同build_key的索引版本
+    error_code: str | None = None
+
+
+class KnowledgeRetrievalRequest(BaseModel):
+    """6C独立检索请求；allowed_scopes由当前管理调试身份显式提供。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    query: str = Field(min_length=1, max_length=2000)
+    business_domain: BusinessDomain
+    allowed_scopes: tuple[str, ...] = Field(
+        default=("public",),
+        min_length=1,
+        max_length=32,
+    )
+    history: tuple[ChatMessage, ...] = Field(default=(), max_length=20)
+    child_top_k: int = Field(default=20, ge=1, le=100)
+    parent_top_k: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("retrieval query must not be blank")
+        return normalized
+
+    @field_validator("allowed_scopes")
+    @classmethod
+    def scopes_must_be_unique_and_safe(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        normalized = tuple(dict.fromkeys(scope.strip() for scope in value))
+        if any(not scope or len(scope) > 64 for scope in normalized):
+            raise ValueError("allowed scopes must contain 1-64 characters")
+        return normalized
+
+
+class RetrievalChildHitView(BaseModel):
+    """经过Milvus召回和MySQL二次复核的Child候选。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    chunk_id: str
+    parent_chunk_id: str
+    document_id: str
+    document_version_id: str
+    index_version_id: str
+    score: float
+
+
+class RetrievalParentView(BaseModel):
+    """Small-to-Big还原后的完整Parent及可解释来源。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent: KnowledgeChunkView
+    document_id: str
+    document_title: str
+    document_version_id: str
+    index_version_id: str
+    matched_child_ids: tuple[str, ...]
+    best_child_score: float
+    first_child_rank: int = Field(ge=1)
+
+
+class KnowledgeRetrievalView(BaseModel):
+    """6C检索调试输出；展示Rewrite、活动索引、Child和Parent两级结果。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rewrite: QueryRewriteResult
+    embedding_model: str
+    active_index_version_ids: tuple[str, ...]
+    child_hits: tuple[RetrievalChildHitView, ...]
+    parents: tuple[RetrievalParentView, ...]
+    incompatible_index_count: int = Field(ge=0)
+    discarded_child_count: int = Field(ge=0)
+    discarded_parent_count: int = Field(ge=0)
 
 
 class KnowledgeChunkView(BaseModel):

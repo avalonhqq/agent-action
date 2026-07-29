@@ -2,18 +2,41 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from typing import cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bili_support.models.entities import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
+    KnowledgeIndexJob,
+    KnowledgeIndexVersion,
     KnowledgeIngestionJob,
     KnowledgeSourceBlock,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveKnowledgeIndex:
+    """检索前从MySQL解析出的活动索引和知识权限事实。"""
+
+    index_version: KnowledgeIndexVersion
+    document_version: KnowledgeDocumentVersion
+    document: KnowledgeDocument
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedKnowledgeChild:
+    """Milvus候选回MySQL复核后的Child及其活动索引上下文。"""
+
+    chunk: KnowledgeChunk
+    index_version: KnowledgeIndexVersion
+    document_version: KnowledgeDocumentVersion
+    document: KnowledgeDocument
 
 
 class KnowledgeRepository:
@@ -37,8 +60,33 @@ class KnowledgeRepository:
     def add_chunks(self, chunks: list[KnowledgeChunk]) -> None:
         self._session.add_all(chunks)
 
+    def add_index_version(self, index_version: KnowledgeIndexVersion) -> None:
+        """登记一个尚未激活的逻辑索引版本。"""
+
+        self._session.add(index_version)
+
+    def add_index_job(self, job: KnowledgeIndexJob) -> None:
+        """登记索引任务；调度和状态迁移由Service负责。"""
+
+        self._session.add(job)
+
     async def document(self, document_id: str) -> KnowledgeDocument | None:
         return await self._session.get(KnowledgeDocument, document_id)
+
+    async def lock_document(
+        self,
+        document_id: str,
+    ) -> KnowledgeDocument | None:
+        """锁定逻辑文档行，串行化同一文档的索引创建和活动版本切换。"""
+
+        return cast(
+            KnowledgeDocument | None,
+            await self._session.scalar(
+                select(KnowledgeDocument)
+                .where(KnowledgeDocument.id == document_id)
+                .with_for_update()
+            ),
+        )
 
     async def active_document_by_identity(
             self,
@@ -68,6 +116,47 @@ class KnowledgeRepository:
 
     async def job(self, job_id: str) -> KnowledgeIngestionJob | None:
         return await self._session.get(KnowledgeIngestionJob, job_id)
+
+    async def index_version(
+        self,
+        index_version_id: str,
+    ) -> KnowledgeIndexVersion | None:
+        return await self._session.get(KnowledgeIndexVersion, index_version_id)
+
+    async def index_job(self, job_id: str) -> KnowledgeIndexJob | None:
+        return await self._session.get(KnowledgeIndexJob, job_id)
+
+    async def index_job_for_version(
+        self,
+        index_version_id: str,
+    ) -> KnowledgeIndexJob | None:
+        return cast(
+            KnowledgeIndexJob | None,
+            await self._session.scalar(
+                select(KnowledgeIndexJob).where(
+                    KnowledgeIndexJob.index_version_id == index_version_id
+                )
+            ),
+        )
+
+    async def index_version_by_build_key(
+        self,
+        *,
+        document_version_id: str,
+        build_key: str,
+    ) -> KnowledgeIndexVersion | None:
+        """相同文档内容和索引配置只创建一个构建版本。"""
+
+        return cast(
+            KnowledgeIndexVersion | None,
+            await self._session.scalar(
+                select(KnowledgeIndexVersion).where(
+                    KnowledgeIndexVersion.document_version_id
+                    == document_version_id,
+                    KnowledgeIndexVersion.build_key == build_key,
+                )
+            ),
+        )
 
     async def latest_job_for_version(
             self,
@@ -175,6 +264,197 @@ class KnowledgeRepository:
             statement.order_by(KnowledgeChunk.ordinal).limit(limit)
         )
         return list(result)
+
+    async def child_chunk_count(self, document_version_id: str) -> int:
+        """只统计会写入向量库的Child，不把Parent重复建向量。"""
+
+        count = await self._session.scalar(
+            select(func.count(KnowledgeChunk.id)).where(
+                KnowledgeChunk.version_id == document_version_id,
+                KnowledgeChunk.kind == "child",
+            )
+        )
+        return int(count or 0)
+
+    async def child_chunk_page(
+        self,
+        *,
+        document_version_id: str,
+        after_ordinal: int | None,
+        limit: int,
+    ) -> list[KnowledgeChunk]:
+        """按不可变ordinal游标分页，避免大文档一次加载进内存。"""
+
+        statement = select(KnowledgeChunk).where(
+            KnowledgeChunk.version_id == document_version_id,
+            KnowledgeChunk.kind == "child",
+        )
+        if after_ordinal is not None:
+            statement = statement.where(KnowledgeChunk.ordinal > after_ordinal)
+        result = await self._session.scalars(
+            statement.order_by(KnowledgeChunk.ordinal).limit(limit)
+        )
+        return list(result)
+
+    async def list_index_versions(
+        self,
+        document_version_id: str,
+    ) -> list[KnowledgeIndexVersion]:
+        result = await self._session.scalars(
+            select(KnowledgeIndexVersion)
+            .where(
+                KnowledgeIndexVersion.document_version_id
+                == document_version_id
+            )
+            .order_by(
+                KnowledgeIndexVersion.created_at.desc(),
+                KnowledgeIndexVersion.id.desc(),
+            )
+        )
+        return list(result)
+
+    async def active_indexes_for_retrieval(
+        self,
+        *,
+        owner_user_id: str,
+        business_domain: str,
+    ) -> list[ActiveKnowledgeIndex]:
+        """返回当前运营用户在指定业务域下的活动索引。
+
+        权限标签包含JSON数组，跨MySQL/SQLite的交集语法并不统一，因此先在SQL中完成
+        用户、状态和业务域过滤，再由Service用集合交集执行权限判断。
+        """
+
+        rows = (
+            await self._session.execute(
+                select(
+                    KnowledgeIndexVersion,
+                    KnowledgeDocumentVersion,
+                    KnowledgeDocument,
+                )
+                .join(
+                    KnowledgeDocumentVersion,
+                    KnowledgeDocumentVersion.id
+                    == KnowledgeIndexVersion.document_version_id,
+                )
+                .join(
+                    KnowledgeDocument,
+                    KnowledgeDocument.id
+                    == KnowledgeDocumentVersion.document_id,
+                )
+                .where(
+                    KnowledgeIndexVersion.status == "active",
+                    KnowledgeDocumentVersion.status == "ready",
+                    KnowledgeDocument.status == "active",
+                    KnowledgeDocument.created_by_user_id == owner_user_id,
+                    KnowledgeDocument.business_domain == business_domain,
+                )
+                .order_by(
+                    KnowledgeIndexVersion.activated_at.desc(),
+                    KnowledgeIndexVersion.id,
+                )
+            )
+        ).all()
+        return [
+            ActiveKnowledgeIndex(
+                index_version=row[0],
+                document_version=row[1],
+                document=row[2],
+            )
+            for row in rows
+        ]
+
+    async def validate_retrieval_children(
+        self,
+        *,
+        chunk_ids: list[str],
+        index_version_ids: list[str],
+    ) -> list[ValidatedKnowledgeChild]:
+        """二次校验候选仍属于active索引和有效知识，不信任Milvus冗余字段。"""
+
+        if not chunk_ids or not index_version_ids:
+            return []
+        rows = (
+            await self._session.execute(
+                select(
+                    KnowledgeChunk,
+                    KnowledgeIndexVersion,
+                    KnowledgeDocumentVersion,
+                    KnowledgeDocument,
+                )
+                .join(
+                    KnowledgeDocumentVersion,
+                    KnowledgeDocumentVersion.id == KnowledgeChunk.version_id,
+                )
+                .join(
+                    KnowledgeDocument,
+                    KnowledgeDocument.id
+                    == KnowledgeDocumentVersion.document_id,
+                )
+                .join(
+                    KnowledgeIndexVersion,
+                    KnowledgeIndexVersion.document_version_id
+                    == KnowledgeDocumentVersion.id,
+                )
+                .where(
+                    KnowledgeChunk.id.in_(chunk_ids),
+                    KnowledgeChunk.kind == "child",
+                    KnowledgeIndexVersion.id.in_(index_version_ids),
+                    KnowledgeIndexVersion.status == "active",
+                    KnowledgeDocumentVersion.status == "ready",
+                    KnowledgeDocument.status == "active",
+                )
+            )
+        ).all()
+        return [
+            ValidatedKnowledgeChild(
+                chunk=row[0],
+                index_version=row[1],
+                document_version=row[2],
+                document=row[3],
+            )
+            for row in rows
+        ]
+
+    async def chunks_by_ids_any_version(
+        self,
+        chunk_ids: list[str],
+    ) -> list[KnowledgeChunk]:
+        """跨文档版本批量读取Parent；UUID主键保证全局唯一。"""
+
+        if not chunk_ids:
+            return []
+        result = await self._session.scalars(
+            select(KnowledgeChunk).where(KnowledgeChunk.id.in_(chunk_ids))
+        )
+        return list(result)
+
+    async def supersede_active_indexes(
+        self,
+        *,
+        document_id: str,
+        except_index_version_id: str,
+        finished_at: datetime,
+    ) -> None:
+        """同一逻辑文档只保留一个活动向量版本。
+
+        通过文档版本表关联逻辑文档，在同一MySQL事务内完成旧版下线和新版激活。
+        """
+
+        document_version_ids = select(KnowledgeDocumentVersion.id).where(
+            KnowledgeDocumentVersion.document_id == document_id
+        )
+        await self._session.execute(
+            update(KnowledgeIndexVersion)
+            .where(
+                KnowledgeIndexVersion.document_version_id.in_(
+                    document_version_ids
+                ),
+                KnowledgeIndexVersion.status == "active",
+                KnowledgeIndexVersion.id != except_index_version_id,
+            )
+            .values(status="superseded", finished_at=finished_at)
+        )
 
     async def chunks_by_ids(
         self,

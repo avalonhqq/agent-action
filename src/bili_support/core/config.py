@@ -29,6 +29,28 @@ class LLMProviderKind(StrEnum):
     OPENAI_COMPATIBLE = "openai_compatible"
 
 
+class EmbeddingProviderKind(StrEnum):
+    """Child文本转稠密向量的Provider类型。"""
+
+    MOCK = "mock"
+    OPENAI_COMPATIBLE = "openai_compatible"
+
+
+class VectorStoreKind(StrEnum):
+    """当前商业化方案统一使用Milvus，不再保留FAISS运行分支。"""
+
+    MILVUS = "milvus"
+
+
+class MilvusConsistencyLevel(StrEnum):
+    """Milvus读写可见性级别；第六周默认同会话写后可读。"""
+
+    STRONG = "Strong"
+    BOUNDED = "Bounded"
+    SESSION = "Session"
+    EVENTUALLY = "Eventually"
+
+
 class LLMStructuredOutputMode(StrEnum):
     """供应商在线路协议层支持的结构化输出能力。"""
 
@@ -84,6 +106,24 @@ class Settings(BaseSettings):
         gt=0,
         le=100 * 1024 * 1024,
     )
+    embedding_provider: EmbeddingProviderKind = EmbeddingProviderKind.MOCK
+    embedding_model: str = "mock-hash-embedding-v1"
+    embedding_dimension: int = Field(default=128, ge=8, le=65536)
+    embedding_batch_size: int = Field(default=64, ge=1, le=256)
+    embedding_timeout_seconds: float = Field(default=30.0, gt=0)
+    # Chunk契约变化会改变向量输入，必须进入索引build_key。
+    knowledge_index_chunk_schema_version: str = "small-to-big-v1"
+    vector_store: VectorStoreKind = VectorStoreKind.MILVUS
+    milvus_enabled: bool = False
+    milvus_required: bool = False
+    milvus_uri: str = "http://127.0.0.1:19530"
+    milvus_token: SecretStr = SecretStr("root:Milvus")
+    # v2新增index_version_id字段；不原地修改已存在的v1 Collection。
+    milvus_collection: str = "bili_support_child_v2"
+    milvus_consistency_level: MilvusConsistencyLevel = MilvusConsistencyLevel.SESSION
+    milvus_index_m: int = Field(default=16, ge=2, le=2048)
+    milvus_index_ef_construction: int = Field(default=200, ge=8, le=4096)
+    milvus_search_ef: int = Field(default=64, ge=1, le=4096)
     api_token: SecretStr = SecretStr("local-demo-token")
     ui_enabled: bool = True
     ui_prefill_demo_credentials: bool = False
@@ -109,6 +149,10 @@ class Settings(BaseSettings):
         "intent_mock_response",
         "database_url",
         "knowledge_storage_dir",
+        "embedding_model",
+        "knowledge_index_chunk_schema_version",
+        "milvus_uri",
+        "milvus_collection",
     )
     @classmethod
     def llm_text_settings_must_not_be_blank(cls, value: str) -> str:
@@ -126,12 +170,22 @@ class Settings(BaseSettings):
             raise ValueError("ui_prefill_demo_credentials must be False in production")
         if self.redis_required and not self.redis_enabled:
             raise ValueError("redis_required needs redis_enabled=True")
+        if self.milvus_required and not self.milvus_enabled:
+            raise ValueError("milvus_required needs milvus_enabled=True")
+        if self.milvus_search_ef < self.milvus_index_m:
+            raise ValueError("milvus_search_ef must be at least milvus_index_m")
         if self.environment == Environment.PRODUCTION and (
             self.api_token.get_secret_value() == "local-demo-token"
             or self.ui_storage_secret.get_secret_value()
             == "local-ui-storage-secret-change-me"
         ):
             raise ValueError("production secrets must be explicitly configured")
+        if (
+            self.environment == Environment.PRODUCTION
+            and self.milvus_enabled
+            and self.milvus_token.get_secret_value() == "root:Milvus"
+        ):
+            raise ValueError("production Milvus token must be explicitly configured")
         return self
 
 

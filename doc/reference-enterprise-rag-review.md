@@ -62,7 +62,8 @@ API 不直接返回 `str(exception)`。外部返回稳定错误码，内部详�
 
 ### 4.7 规模与索引
 
-IndexFlatIP 适合小规模准确基线，不代表生产扩展方案。BiliSupport AI 保留 VectorStore 协议，以 FAISS 做 MVP，并能迁移 Qdrant。
+参考项目的 IndexFlatIP 适合小规模准确基线，不代表生产扩展方案。BiliSupport AI 保留
+`VectorStore` 协议，正式实现采用 Milvus HNSW/COSINE，并通过 Collection 版本隔离模型与维度变化。
 
 ## 5. 新增设计：客服版 Small-to-Big
 

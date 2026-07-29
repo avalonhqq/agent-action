@@ -51,6 +51,8 @@ def test_initial_migration_is_repeatable(
         "knowledge_ingestion_jobs",
         "knowledge_source_blocks",
         "knowledge_chunks",
+        "knowledge_index_versions",
+        "knowledge_index_jobs",
     } <= tables
-    assert revision == ("20260728_0004",)
+    assert revision == ("20260729_0005",)
     assert operation_column[2] == "VARCHAR(64)"

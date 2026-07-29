@@ -54,7 +54,7 @@ flowchart TD
 - MySQL：用户、会话、消息、知识元数据、FAQ、工具审计、反馈。
 - Redis：有 TTL 的模型会话历史缓存、后续限流与短期状态；MySQL 始终是事实来源。
 - 文件/Object Storage：原始文档和标准化解析结果。
-- FAISS：MVP 向量索引；通过接口支持替换 Qdrant。
+- Milvus：Child Chunk 向量、HNSW/COSINE 索引和业务域/权限/版本预过滤。
 - BM25：MVP 本地索引；索引版本与知识版本绑定。
 - Checkpoint Store：LangGraph 状态恢复。
 
@@ -78,6 +78,38 @@ flowchart LR
 
 Rerank 失败时回退融合排序；补检索最多一次；低质量候选不能为了覆盖而强行进入答案。
 
+当前第6周向量单路已经实现以下安全链路：
+
+```text
+Standalone Query
+→ MySQL解析owner/domain/scope下的active index_version_id
+→ Query Embedding
+→ Milvus按domain/scope/index_version_id预过滤
+→ MySQL复核文档、版本、权限、Child类型和Parent关系
+→ Small-to-Big去重还原Parent
+```
+
+Milvus字段均为可重建副本，不能独立作出权限决定。活动索引在检索前生成白名单，命中后再次复核，
+因此构建状态切换或副本同步延迟不会让failed/superseded/越权候选进入模型上下文。
+
+### 3.2 向量索引版本切换
+
+```mermaid
+flowchart LR
+    R["ready文档版本"] --> B["building index_version_id"]
+    B --> E["分批Embedding"]
+    E --> U["Milvus upsert"]
+    U --> C{"全部Child写入？"}
+    C -->|否| F["failed；清理本版本"]
+    C -->|是| T["MySQL原子事务"]
+    T --> S["旧active → superseded"]
+    T --> A["新building → active"]
+```
+
+Collection名表达物理Schema版本（当前`bili_support_child_v2`），`index_version_id`表达其中的逻辑
+构建代次。检索器必须从MySQL取得活动索引ID并加入Milvus过滤，不能搜索building、failed或
+superseded版本。
+
 ## 4. 主工作流
 
 ```text
@@ -96,7 +128,7 @@ Rerank 失败时回退融合排序；补检索最多一次；低质量候选不�
 
 - `LLMProvider`：Mock ↔ OpenAI-compatible。
 - `EmbeddingProvider`：Hash Mock ↔ 云端/本地模型。
-- `VectorStore`：FAISS ↔ Qdrant。
+- `VectorStore`：业务层只依赖协议，当前正式实现为 Milvus。
 - `ObjectStorage`：本地 ↔ S3/OSS/MinIO。
 - `HumanHandoffService`：Mock ↔ 企业客服/工单系统。
 - `BusinessGateway`：仿真 MySQL ↔ 企业领域 API。

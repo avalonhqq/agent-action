@@ -26,6 +26,70 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - --advertise-client-urls=http://milvus-etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    volumes:
+      - milvus_etcd_data:/etcd
+    restart: unless-stopped
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - milvus_minio_data:/minio_data
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.6.20
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MQ_TYPE: woodpecker
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      milvus-etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    volumes:
+      - milvus_data:/var/lib/milvus
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -40,6 +104,11 @@ services:
       BILI_SUPPORT_REDIS_ENABLED: "true"
       BILI_SUPPORT_REDIS_REQUIRED: "true"
       BILI_SUPPORT_REDIS_URL: redis://redis:6379/0
+      BILI_SUPPORT_MILVUS_ENABLED: "true"
+      BILI_SUPPORT_MILVUS_REQUIRED: "true"
+      BILI_SUPPORT_MILVUS_URI: http://milvus:19530
+      BILI_SUPPORT_MILVUS_TOKEN: root:Milvus
+      BILI_SUPPORT_MILVUS_COLLECTION: bili_support_child_v2
       BILI_SUPPORT_API_TOKEN: local-demo-token
       BILI_SUPPORT_UI_PREFILL_DEMO_CREDENTIALS: "true"
       BILI_SUPPORT_UI_STORAGE_SECRET: local-compose-ui-secret
@@ -48,6 +117,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      milvus:
+        condition: service_healthy
     ports:
       - "8010:8010"
     restart: unless-stopped
@@ -55,3 +126,6 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:

@@ -255,3 +255,91 @@ class KnowledgeChunk(Base):
     content: Mapped[str] = mapped_column(Text)
     char_count: Mapped[int] = mapped_column(Integer)
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSON)
+
+
+class KnowledgeIndexVersion(Base):
+    """一次可独立构建和切换的向量索引版本。
+
+    文档版本描述“原始知识内容”，索引版本描述“某个Embedding模型和分块契约生成的
+    检索副本”。两者分离后，更换模型或索引参数不需要篡改文档版本。
+    """
+
+    __tablename__ = "knowledge_index_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_version_id",
+            "build_key",
+            name="uq_knowledge_index_versions_build_key",
+        ),
+        CheckConstraint(
+            "status IN ('building', 'active', 'superseded', 'failed')",
+            name="status_allowed",
+        ),
+        CheckConstraint("embedding_dimension > 1", name="dimension_valid"),
+        CheckConstraint("total_chunks >= 0", name="total_chunks_non_negative"),
+        CheckConstraint("indexed_chunks >= 0", name="indexed_chunks_non_negative"),
+        CheckConstraint(
+            "indexed_chunks <= total_chunks",
+            name="indexed_chunks_not_over_total",
+        ),
+        Index(
+            "ix_knowledge_index_versions_document_status",
+            "document_version_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_version_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_document_versions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    # Collection名称表达物理Schema版本；index_version_id表达其中的逻辑构建代次。
+    collection_name: Mapped[str] = mapped_column(String(128))
+    embedding_provider: Mapped[str] = mapped_column(String(32))
+    embedding_model: Mapped[str] = mapped_column(String(200))
+    embedding_dimension: Mapped[int] = mapped_column(Integer)
+    chunk_schema_version: Mapped[str] = mapped_column(String(64))
+    # build_key对“内容版本 + 模型 + 维度 + Chunk契约 + Collection”做幂等。
+    build_key: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="building")
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    indexed_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KnowledgeIndexJob(Base):
+    """可重试的索引构建任务；当前同步执行，未来可由队列消费同一job_id。"""
+
+    __tablename__ = "knowledge_index_jobs"
+    __table_args__ = (
+        UniqueConstraint("index_version_id", name="uq_knowledge_index_jobs_version"),
+        CheckConstraint(
+            "status IN ('queued', 'processing', 'succeeded', 'failed')",
+            name="status_allowed",
+        ),
+        CheckConstraint("attempt_count >= 0", name="attempt_non_negative"),
+        Index("ix_knowledge_index_jobs_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    index_version_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_index_versions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

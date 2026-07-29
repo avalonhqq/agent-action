@@ -9,9 +9,11 @@ from fastapi.testclient import TestClient
 from pydantic_core import ValidationError
 
 from bili_support.core.config import (
+    EmbeddingProviderKind,
     Environment,
     LLMProviderKind,
     LLMStructuredOutputMode,
+    MilvusConsistencyLevel,
     Settings,
     get_settings,
     reset_settings,
@@ -45,6 +47,11 @@ def test_default_settings() -> None:
     assert settings.log_level.value == "INFO"
     assert settings.llm_provider is LLMProviderKind.MOCK
     assert settings.llm_temperature == 0.0
+    assert settings.embedding_provider is EmbeddingProviderKind.MOCK
+    assert settings.embedding_dimension == 128
+    assert settings.milvus_collection == "bili_support_child_v2"
+    assert settings.milvus_enabled is False
+    assert settings.milvus_consistency_level is MilvusConsistencyLevel.SESSION
 
 
 def test_llm_environment_values_are_typed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,6 +74,13 @@ def test_redis_required_needs_redis_enabled() -> None:
         Settings(_env_file=None, redis_required=True, redis_enabled=False)
 
     assert "redis_required" in str(exc_info.value)
+
+
+def test_milvus_required_needs_milvus_enabled() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, milvus_required=True, milvus_enabled=False)
+
+    assert "milvus_required" in str(exc_info.value)
 
 
 def test_production_cannot_prefill_demo_credentials() -> None:

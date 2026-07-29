@@ -9,7 +9,7 @@
 | 3   | Web 服务、会话、网站           | 已完成 | 2026-07-19 | 2026-07-20 | 106 项全量测试；MySQL/Redis、迁移、持久化会话、简单鉴权、SSE 和 NiceGUI  |
 | 4   | 意图识别与结构化决策             | 已完成 | 2026-07-21 | 2026-07-25 | hybrid_v3；48 条真实复验；路由/澄清 100%，高风险漏判 0%              |
 | 5   | RAG 知识表示与 Chunk        | 已完成 | 2026-07-25 | 2026-07-28 | 结构化分块、Small-to-Big、固定数据集与可解释Chunk评估               |
-| 6   | Embedding 与向量检索        | 未开始 |            |            | 向量语义、过滤、Query Rewrite 和 Recall@K                   |
+| 6   | Embedding 与向量检索        | 进行中 | 2026-07-28 |            | Embedding 契约、Hash Mock、Milvus HNSW/COSINE 边界          |
 | 7   | 混合检索、Rerank 与策略        | 未开始 |            |            | BM25、RRF、Reranker、策略和覆盖评估                          |
 | 8   | 证据生成与 RAG 评估           | 未开始 |            |            | Grounded Prompt、引用、拒答和 Faithfulness                |
 | 9   | LangGraph 状态化工作流       | 未开始 |            |            | 可回放、可恢复、有限步的模型工作流                                  |
@@ -77,6 +77,15 @@
 | 5A | 文档入库契约与自动工程底座 | 已完成 | PDF/DOCX/Markdown/TXT 可追踪入库，重复文件幂等 |
 | 5B | 结构化 Chunk 与 Small-to-Big | 已完成 | Child 可召回、Parent 可批量还原，标题和表格语义不丢失 |
 | 5C | Chunk 数据集、评估与知识库调试接口 | 已完成 | 8条固定样本比较策略，失败可定位来源文件和SourceBlock |
+
+## 第 6 周新安排
+
+| Step | 内容 | 状态 | 验收目标 |
+|---|---|---|---|
+| 6A | Embedding 契约与 Milvus 边界 | 已完成 | Mock 可复现；Collection、HNSW/COSINE、过滤与真实读写可用 |
+| 6B | 批量索引、索引版本与安全切换 | 已完成 | Child 分页批量写入；失败可重试；MySQL 原子切换活动版本 |
+| 6C | 向量检索与 Small-to-Big | 已完成 | Rewrite、活动索引/权限过滤、MySQL复核与Parent还原 |
+| 6D | Golden Dataset 与 Recall@K | 下一步 | 输出 Recall@1/3/5、延迟与可定位失败样本 |
 
 ## 每周复盘模板
 

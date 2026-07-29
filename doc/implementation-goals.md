@@ -51,7 +51,7 @@
 - FastAPI、Pydantic v2、SQLAlchemy 2.0、Alembic。
 - `asyncio`、异步 HTTP、SSE 和任务取消。
 - MySQL 8 事实存储、Redis 短期缓存；测试可使用 SQLite 兼容配置。
-- FAISS 起步，向量层可替换 Qdrant。
+- Milvus Standalone 起步，通过同一客户端边界可演进到 Milvus Distributed。
 - NiceGUI 构建聊天、知识管理和评估页面。
 - pytest、Ruff、mypy、pre-commit。
 - structlog、OpenTelemetry、指标与审计。

@@ -29,8 +29,16 @@ from bili_support.intent.hybrid import HybridIntentClassifier
 from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.knowledge.chunk_strategies import StrategySelector
+from bili_support.knowledge.embedding import (
+    DeterministicHashEmbeddingProvider,
+    EmbeddingProvider,
+)
 from bili_support.knowledge.loaders import create_default_loader_registry
 from bili_support.knowledge.storage import LocalKnowledgeFileStore
+from bili_support.knowledge.vector_store import (
+    MilvusVectorStore,
+    VectorStore,
+)
 from bili_support.llm.context import BoundedContextBuilder, StandaloneQueryRewriter
 from bili_support.llm.factory import build_llm_provider
 from bili_support.llm.openai_compatible import OpenAICompatibleProvider
@@ -41,7 +49,9 @@ from bili_support.llm.usage import InMemoryUsageRecorder, UsageRecorder
 from bili_support.routing import CustomerServiceRouter
 from bili_support.schemas.system import HealthResponse, ReadinessResponse
 from bili_support.services.conversations import ConversationService
+from bili_support.services.indexing import KnowledgeIndexingService
 from bili_support.services.knowledge import KnowledgeIngestionService
+from bili_support.services.retrieval import KnowledgeRetrievalService
 from bili_support.ui import register_support_ui
 
 
@@ -53,6 +63,8 @@ def create_app(
         usage_recorder: UsageRecorder | None = None,
         database: Database | None = None,
         history_cache: ConversationHistoryCache | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        vector_store: VectorStore | None = None,
 ) -> FastAPI:
     """使用显式注入或缓存配置创建完整 FastAPI 应用。"""
     current_settings = settings or get_settings()
@@ -127,6 +139,55 @@ def create_app(
         ),
         max_file_bytes=current_settings.knowledge_max_file_bytes,
     )
+    # 6B默认使用确定性Hash Mock验证索引管线；真实Embedding Provider在后续模型实验接入。
+    current_embedding_provider = embedding_provider or (
+        DeterministicHashEmbeddingProvider(
+            dimension=current_settings.embedding_dimension
+        )
+    )
+    # 测试和纯SQLite模式不建立Milvus连接；开启后使用新的v2 Collection Schema。
+    current_vector_store = vector_store or (
+        MilvusVectorStore(
+            uri=current_settings.milvus_uri,
+            token=current_settings.milvus_token.get_secret_value(),
+            collection_name=current_settings.milvus_collection,
+            dimension=current_settings.embedding_dimension,
+            index_m=current_settings.milvus_index_m,
+            index_ef_construction=(
+                current_settings.milvus_index_ef_construction
+            ),
+            search_ef=current_settings.milvus_search_ef,
+            consistency_level=(
+                current_settings.milvus_consistency_level.value
+            ),
+        )
+        if current_settings.milvus_enabled
+        else None
+    )
+    knowledge_indexing_service = KnowledgeIndexingService(
+        database=current_database,
+        embedding_provider=current_embedding_provider,
+        vector_store=current_vector_store,
+        embedding_provider_name=current_settings.embedding_provider.value,
+        embedding_model=current_settings.embedding_model,
+        embedding_dimension=current_settings.embedding_dimension,
+        embedding_batch_size=current_settings.embedding_batch_size,
+        embedding_timeout_seconds=current_settings.embedding_timeout_seconds,
+        collection_name=current_settings.milvus_collection,
+        chunk_schema_version=(
+            current_settings.knowledge_index_chunk_schema_version
+        ),
+    )
+    knowledge_retrieval_service = KnowledgeRetrievalService(
+        database=current_database,
+        embedding_provider=current_embedding_provider,
+        vector_store=current_vector_store,
+        embedding_model=current_settings.embedding_model,
+        embedding_dimension=current_settings.embedding_dimension,
+        embedding_timeout_seconds=current_settings.embedding_timeout_seconds,
+        collection_name=current_settings.milvus_collection,
+        rewriter=StandaloneQueryRewriter(),
+    )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
 
     @asynccontextmanager
@@ -147,6 +208,8 @@ def create_app(
                 await current_intent_provider.aclose()
             if redis_cache is not None:
                 await redis_cache.aclose()
+            if current_vector_store is not None:
+                await current_vector_store.aclose()
             await current_database.dispose()
 
     application = FastAPI(
@@ -161,6 +224,8 @@ def create_app(
             chat_service,
             conversation_service,
             knowledge_service,
+            knowledge_indexing_service,
+            knowledge_retrieval_service,
             authenticate,
         )
     )
@@ -170,6 +235,8 @@ def create_app(
     application.state.conversation_service = conversation_service
     application.state.intent_classifier = intent_classifier
     application.state.knowledge_service = knowledge_service
+    application.state.knowledge_indexing_service = knowledge_indexing_service
+    application.state.knowledge_retrieval_service = knowledge_retrieval_service
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -198,6 +265,14 @@ def create_app(
                 if current_settings.redis_required:
                     raise ServiceNotReadyError() from exc
                 checks["redis"] = "degraded"
+        if current_vector_store is not None:
+            try:
+                await current_vector_store.ping()
+                checks["milvus"] = "ready"
+            except Exception as exc:
+                if current_settings.milvus_required:
+                    raise ServiceNotReadyError() from exc
+                checks["milvus"] = "degraded"
         return ReadinessResponse(
             service=current_settings.app_name,
             version=current_settings.app_version,

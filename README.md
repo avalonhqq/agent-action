@@ -6,8 +6,8 @@
 
 ## 项目状态
 
-前四周已经完成，第五周知识入库底座已就绪：项目具备工程基线、可替换的 LLM 调用链路、
-可持久化的多用户客服会话，以及可追溯、可版本化的文档解析能力。
+前五周已经完成，第六周 Embedding 与 Milvus 向量检索已启动：项目具备工程基线、
+可替换的 LLM 调用链路、可持久化的多用户客服会话，以及可追溯、可版本化的文档解析能力。
 
 - 已建立标准 `src/bili_support` 工程骨架。
 - 已实现类型化配置、应用工厂、健康/就绪探针、统一错误响应、Request ID 和结构化日志。
@@ -15,6 +15,7 @@
 - 已实现 LLM 内部契约、确定性 Mock、OpenAI-compatible 适配器、Prompt 版本、结构化输出、上下文控制、Chat API、SSE 和安全用量记录。
 - 已实现 SQLAlchemy 2 异步数据层、Alembic 迁移、用户/会话/消息/模型调用、简单鉴权、持久化 SSE 和 NiceGUI 页面。
 - 已实现 PDF、DOCX、Markdown、TXT 统一 Loader、SHA-256 幂等、文档版本、解析任务和结构块持久化。
+- 已实现 `EmbeddingProvider`、确定性 Hash Mock、Milvus `VectorStore` 边界和 HNSW/COSINE Collection。
 - RAG 检索、Agent 和业务工具会按周逐步实现。
 - 课程采用“大模型核心学习 + 工程底座自动完成”模式：重点讲解并实验 Prompt、RAG、意图、Agent、安全和评估；CRUD、迁移、鉴权、页面与部署由 Codex 自动实现并通过门禁。
 
@@ -37,7 +38,7 @@
 ```text
 agent-action/
 ├── Dockerfile                # 非 root 容器运行基线
-├── compose.yaml              # 当前 API 服务编排
+├── compose.yaml              # API、MySQL、Redis、Milvus 服务编排
 ├── alembic.ini               # 数据库迁移配置
 ├── migrations/               # 可追踪 Schema 迁移
 ├── pyproject.toml             # 项目元数据、依赖和质量工具配置
@@ -77,7 +78,7 @@ agent-action/
 - Windows 10/11、Linux 或 macOS。
 - Python 3.12 或更高版本。
 - Git，可选但推荐。
-- 默认 SQLite 模式不要求 MySQL、Redis、Docker 或模型 API Key；当前本地 `.env` 已切换到 MySQL/Redis。
+- 默认 SQLite/Mock 模式不要求 MySQL、Redis、Milvus 或模型 API Key；启用完整知识检索时需要 Milvus。
 - 使用容器启动时需要 Docker Desktop 或 Docker Engine。
 
 检查 Python：
@@ -197,6 +198,99 @@ curl.exe -N -X POST http://127.0.0.1:8010/api/v1/chat/stream `
   -H "Content-Type: application/json" `
   -d '{"message":"大会员有哪些权益？","history":[]}'
 ```
+
+## Windows + WSL2 启动 Milvus
+
+本机使用 `Ubuntu-24.04` WSL2 中的 Docker Engine。项目提供的脚本会：
+
+1. 启动一个隐藏 WSL 保活进程，防止命令结束后 Docker 被一并终止。
+2. 启动 Docker daemon。
+3. 启动 Milvus Standalone、etcd 和 MinIO。
+
+```powershell
+cd C:\workspace\agent-action
+powershell -ExecutionPolicy Bypass -File .\scripts\start_milvus.ps1
+```
+
+首次拉取镜像后，Milvus 通常还需要约一分钟变为健康状态：
+
+```powershell
+wsl -d Ubuntu-24.04 -- sh -lc "cd /mnt/c/workspace/agent-action && docker compose ps milvus"
+```
+
+正常状态应显示 `healthy`。服务入口：
+
+- Milvus SDK：<http://127.0.0.1:19530>
+- Milvus WebUI/健康服务：<http://127.0.0.1:9091/webui/>
+- 健康检查：<http://127.0.0.1:9091/healthz>
+- MinIO Console：<http://127.0.0.1:9001>
+
+仅停止 Milvus 组件：
+
+```powershell
+wsl -d Ubuntu-24.04 -- sh -lc "cd /mnt/c/workspace/agent-action && docker compose stop milvus milvus-etcd milvus-minio"
+```
+
+本地原生 Python API 使用 `BILI_SUPPORT_MILVUS_URI=http://127.0.0.1:19530`；
+Compose 内的 API 使用 `http://milvus:19530`。默认 Collection 为
+`bili_support_child_v2`，其向量维度必须和 Embedding 模型一致。更换模型或维度时应创建
+新 Collection，不要复用不兼容的旧 Schema。
+
+### 存储职责
+
+- MySQL：文档、版本、权限、Chunk 正文、索引任务的事实来源。
+- Milvus：Child Chunk 向量与检索过滤所需的少量冗余元数据。
+- MinIO：Milvus 内部对象数据；不是客服知识正文的事实来源。
+- etcd：Milvus 内部元数据协调。
+
+因此“换成 Milvus”只替换向量索引层，不替换 MySQL。命中 Milvus 后仍需回 MySQL做权限复核、
+版本校验和 Small-to-Big Parent 还原。
+
+### 构建知识版本向量索引
+
+先上传并解析文档，得到状态为 `ready` 的 `version_id`，然后调用：
+
+```powershell
+$headers = @{
+  Authorization = "Bearer local-demo-token"
+  "X-User-ID" = "local-admin"
+  "X-User-Name" = "Local Admin"
+}
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8010/api/v1/knowledge/versions/<version_id>/indexes" `
+  -Headers $headers
+```
+
+相关接口：
+
+- `POST /api/v1/knowledge/versions/{version_id}/indexes`：幂等创建并构建索引。
+- `GET /api/v1/knowledge/versions/{version_id}/indexes`：查看构建历史。
+- `GET /api/v1/knowledge/index-jobs/{job_id}`：查看任务状态和进度。
+- `POST /api/v1/knowledge/index-jobs/{job_id}/retry`：重试失败构建。
+- `POST /api/v1/knowledge/retrieve`：调试Rewrite、向量Child召回和Parent还原。
+
+每条Milvus记录包含 `index_version_id`。新版本全部写完后，MySQL在一个事务中把旧活动版本标记为
+`superseded`、把新版本标记为`active`；失败和构建中的向量不会进入后续检索。
+
+检索示例：
+
+```powershell
+$body = @{
+  query = "大会员支付成功后多久生效？"
+  business_domain = "membership"
+  allowed_scopes = @("public")
+  child_top_k = 10
+  parent_top_k = 5
+  history = @()
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://127.0.0.1:8010/api/v1/knowledge/retrieve" `
+  -Headers $headers -ContentType "application/json" -Body $body
+```
+
+该接口属于知识运营调试入口：只搜索当前管理身份创建的知识，并将请求权限与文档权限取交集。
+正式客服链路后续会从受信任的身份/租户上下文生成权限范围，而不会接收终端用户自报权限。
 
 ## Linux/macOS 安装与启动
 
