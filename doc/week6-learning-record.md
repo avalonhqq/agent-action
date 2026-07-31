@@ -368,18 +368,139 @@ Child Top-K
 答：阈值必须根据6D Golden Dataset的Recall、误召回和分数分布校准，不能凭经验写死。当前返回
 原始COSINE分数供评估。
 
-## 6. 6D：固定检索集与 Recall@K
+## 6. 6D：Golden Dataset 与 Recall@K（已完成）
 
-建立首批 Golden Dataset，每条样本至少包含：
+### 6.1 为什么金标准不直接保存数据库UUID
 
-- 用户问题；
-- 预期命中的 Child/Parent；
-- 业务域与权限；
-- 允许命中的文档版本；
-- 边界样本和不应命中的负例。
+文档重新上传后，文档版本、Parent和Child的UUID都会变化。若固定集写死UUID，同一份知识在另一
+个开发环境中无法复用。本次每个相关Parent使用以下稳定匹配条件：
 
-输出 Recall@1、Recall@3、Recall@5、延迟分位数和失败样本。测试脚手架自动运行，但学习重点是
-阅读失败：是 Query 表达、Embedding、Chunk、过滤、Top-K，还是标注本身有问题。
+```text
+可选的文档标题
++ Parent正文必须同时包含的文本锚点
+```
+
+例如“大会员未到账”金标准要求标题为`大会员开通说明`，正文同时包含
+`核对支付状态、账号、订单和UID`与`订单号和支付流水`。这种标注仍然指向明确事实，同时允许
+数据库重新初始化。
+
+### 6.2 数据集组成
+
+首版[data/evaluation/retrieval_dev_v1.jsonl](../data/evaluation/retrieval_dev_v1.jsonl)
+包含10条样本：
+
+- 8条会员FAQ正例：生效、价格、取消续费、卸载扣费、充错账号、退款、未到账、视频不可看；
+- 1条无活动索引业务域负例，用于验证领域过滤；
+- 1条会员域内无答案负例，用于观察低相关候选是否被错误返回。
+
+Few-shot原题没有直接复制进评估集；正例问题使用客服口语化改写，避免只衡量原文字符串匹配。
+
+### 6.3 评估执行链路
+
+```mermaid
+flowchart LR
+    D["固定JSONL"] --> L["严格加载与去重"]
+    L --> S["真实KnowledgeRetrievalService"]
+    S --> R["Top-5 Parent"]
+    R --> M["匹配相关Parent"]
+    M --> P["Recall/MRR/负例准确率/延迟"]
+    P --> O["Markdown + JSON报告"]
+```
+
+评估器调用完整6C Service，因此实际覆盖Query Rewrite、活动索引白名单、Embedding、Milvus、
+MySQL二次校验和Small-to-Big。它没有绕过业务层直接查询Milvus。
+
+代码阅读顺序：
+
+1. [retrieval_types.py](../src/bili_support/evaluation/retrieval_types.py)：金标准、候选和报告契约；
+2. [retrieval_data.py](../src/bili_support/evaluation/retrieval_data.py)：JSONL严格加载；
+3. [retrieval_runner.py](../src/bili_support/evaluation/retrieval_runner.py)：执行、匹配和指标计算；
+4. [retrieval_report.py](../src/bili_support/evaluation/retrieval_report.py)：人读失败报告；
+5. [retrieval_cli.py](../src/bili_support/evaluation/retrieval_cli.py)：真实环境运行入口。
+
+### 6.4 指标定义
+
+- `Recall@K`：每条正例在前K个Parent中命中的相关Parent比例，再对全部正例宏平均；
+- `MRR@5`：首个相关Parent排名的倒数，越接近1说明正确知识越靠前；
+- 负例准确率：期望无答案的样本是否真的返回空结果；
+- 执行失败率：模型、数据库或Milvus异常导致的失败占比；
+- P50/P95：成功执行样本的端到端检索耗时，采用nearest-rank定义。
+
+负例不参与Recall，否则“正确返回空结果”会被错误记成Recall为0并拉低正例召回指标。
+
+### 6.5 首次真实基线
+
+使用当前MySQL活动索引、Milvus中的175个Child向量和`mock-hash-embedding-v1`运行10条样本：
+
+| 指标 | 结果 |
+|---|---:|
+| Recall@1 | 75.00% |
+| Recall@3 | 87.50% |
+| Recall@5 | 100.00% |
+| MRR@5 | 84.38% |
+| 负例准确率 | 50.00% |
+| 执行失败率 | 0.00% |
+| P50 | 11.87 ms |
+| P95 | 174.98 ms |
+
+完整报告：
+
+- [retrieval_report_v1.md](../data/evaluation/retrieval_report_v1.md)
+- [retrieval_report_v1.json](../data/evaluation/retrieval_report_v1.json)
+
+P95由第一次冷启动请求拉高，不能用10条样本宣称生产性能。后续性能结论应增加预热、多轮运行和
+更大样本量。
+
+### 6.6 失败样本解读
+
+域内无答案问题“明天上海演唱会的门票在哪里购买？”仍返回了5个大会员Parent。根因不是权限
+泄漏，而是当前6C只有Top-K排序，没有相似度阈值或覆盖/拒答策略：即使所有候选都很弱，
+Milvus仍会返回最接近的K条。
+
+当前不根据10条样本直接写死阈值，因为：
+
+1. Hash Mock分数不代表真实语义Embedding分布；
+2. 单一会员文档不能覆盖全部业务域；
+3. 阈值需要同时观察正例漏召回和负例误召回；
+4. 第7周还会加入BM25、RRF与Rerank，候选分数语义会变化。
+
+这个失败成为第7周RetrievalPolicy的明确输入：比较向量、BM25、混合与Rerank后，再通过扩充的
+正负例校准接受、澄清、拒答或转人工策略。
+
+### 6.7 运行方式
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.retrieval_cli `
+  --user-id demo-user `
+  --user-name "Demo User"
+```
+
+安装项目脚本后也可以运行：
+
+```powershell
+bili-retrieval-eval
+```
+
+### 6.8 思考题与答案
+
+**Q：Recall@5为100%，为什么系统仍不能直接上线？**
+
+答：Recall只衡量正例相关知识是否进入Top-K，不衡量无答案时是否误召回。本次负例准确率只有
+50%，已经证明只看Recall会掩盖风险。
+
+**Q：Recall@1和MRR有什么区别？**
+
+答：Recall@1只关心第一名是否命中；MRR会区分相关答案排第2、第3或第5，对排序改进更敏感。
+
+**Q：为什么延迟统计排除执行错误？**
+
+答：Provider立即报错的极短耗时不是成功服务延迟，把它混进P50/P95会让性能看起来虚假变好；
+错误由独立的执行失败率衡量。
+
+**Q：为什么当前评估串行执行？**
+
+答：首版目标是建立可重复的单请求延迟和质量基线。并发评估会同时引入连接池、吞吐和资源竞争，
+这些属于单独的负载测试问题。
 
 ## 7. 本模块思考题与答案
 
@@ -415,6 +536,7 @@ Child Top-K
 
 ## 8. 当前结论
 
-第6周6A、6B、6C已完成：Embedding边界、Milvus Schema、Child批量构建、活动索引安全切换、
-Query Rewrite、权限过滤、MySQL二次复核和Parent还原均已具备。真实检索返回5个Child和3个
-Parent，Top-1 COSINE为1.0。Recall@K、延迟分位数和失败样本分析属于6D。
+第6周6A～6D已完成：Embedding边界、Milvus Schema、Child批量构建、活动索引安全切换、
+Query Rewrite、权限过滤、MySQL二次复核、Parent还原及固定检索评估均已具备。首版真实基线
+Recall@1/3/5为75%/87.5%/100%，并定位到域内无答案误召回。下一阶段进入第7周中文BM25、
+混合召回、Rerank和RetrievalPolicy。

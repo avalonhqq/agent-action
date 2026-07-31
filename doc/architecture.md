@@ -78,19 +78,20 @@ flowchart LR
 
 Rerank 失败时回退融合排序；补检索最多一次；低质量候选不能为了覆盖而强行进入答案。
 
-当前第6周向量单路已经实现以下安全链路：
+当前已经实现可独立比较的Vector与BM25两条安全链路：
 
 ```text
 Standalone Query
 → MySQL解析owner/domain/scope下的active index_version_id
-→ Query Embedding
-→ Milvus按domain/scope/index_version_id预过滤
+→ Vector：Query Embedding + Milvus过滤召回
+  或 BM25：活动版本Child本地词法索引召回
 → MySQL复核文档、版本、权限、Child类型和Parent关系
 → Small-to-Big去重还原Parent
 ```
 
-Milvus字段均为可重建副本，不能独立作出权限决定。活动索引在检索前生成白名单，命中后再次复核，
-因此构建状态切换或副本同步延迟不会让failed/superseded/越权候选进入模型上下文。
+Milvus字段和BM25候选身份均为可重建副本，不能独立作出权限决定。活动索引在检索前生成白名单，
+命中后再次复核，因此构建状态切换或副本同步延迟不会让failed/superseded/越权候选进入模型
+上下文。7B使用RRF融合排名，不能直接把COSINE与BM25原始分数相加。
 
 ### 3.2 向量索引版本切换
 

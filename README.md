@@ -267,7 +267,7 @@ Invoke-RestMethod -Method Post `
 - `GET /api/v1/knowledge/versions/{version_id}/indexes`：查看构建历史。
 - `GET /api/v1/knowledge/index-jobs/{job_id}`：查看任务状态和进度。
 - `POST /api/v1/knowledge/index-jobs/{job_id}/retry`：重试失败构建。
-- `POST /api/v1/knowledge/retrieve`：调试Rewrite、向量Child召回和Parent还原。
+- `POST /api/v1/knowledge/retrieve`：独立调试Vector/BM25 Child召回和Parent还原。
 
 每条Milvus记录包含 `index_version_id`。新版本全部写完后，MySQL在一个事务中把旧活动版本标记为
 `superseded`、把新版本标记为`active`；失败和构建中的向量不会进入后续检索。
@@ -279,6 +279,7 @@ $body = @{
   query = "大会员支付成功后多久生效？"
   business_domain = "membership"
   allowed_scopes = @("public")
+  retrieval_mode = "vector" # 改成bm25可运行中文词法基线
   child_top_k = 10
   parent_top_k = 5
   history = @()
@@ -469,6 +470,46 @@ data/evaluation/chunk_report_v1.json
 
 该评估比较 `generic_baseline` 和 `specialized` 的 Child 语义单元、Parent 上下文、策略匹配和
 父子追溯质量。它不调用模型、不产生费用，也不代表第6周向量检索的 Recall@K。
+
+### 固定检索评估
+
+检索评估集位于`data/evaluation/retrieval_dev_v1.jsonl`。它通过完整在线检索服务运行，
+因此要求当前`.env`中的MySQL、Milvus和Embedding配置与活动索引一致。
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.retrieval_cli `
+  --mode vector `
+  --user-id demo-user `
+  --user-name "Demo User"
+```
+
+运行7A BM25基线：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.retrieval_cli `
+  --mode bm25 `
+  --user-id demo-user `
+  --user-name "Demo User" `
+  --output-prefix data/evaluation/retrieval_bm25_report_v1
+```
+
+安装项目后也可以运行：
+
+```powershell
+bili-retrieval-eval
+```
+
+默认输出：
+
+```text
+data/evaluation/retrieval_vector_report_v1.md
+data/evaluation/retrieval_vector_report_v1.json
+data/evaluation/retrieval_bm25_report_v1.md
+data/evaluation/retrieval_bm25_report_v1.json
+```
+
+报告包含Recall@1/3/5、MRR@5、负例准确率、执行失败率、P50/P95及可定位失败样本。首版
+Golden Dataset使用“可选文档标题+Parent正文锚点”定位相关知识，不依赖重新导入后会变化的UUID。
 
 ## 可选：接入 OpenAI-compatible 服务
 

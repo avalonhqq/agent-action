@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bili_support.intent.types import BusinessDomain
 from bili_support.knowledge.chunking import ChunkDraft, DocumentKnowledgeType
+from bili_support.knowledge.retrieval import RetrievalMode, RetrievalSource
 from bili_support.knowledge.types import LoadedSourceBlock
 from bili_support.llm.context import QueryRewriteResult
 from bili_support.llm.types import ChatMessage
@@ -95,7 +96,7 @@ class KnowledgeIndexingView(BaseModel):
 
 
 class KnowledgeRetrievalRequest(BaseModel):
-    """6C独立检索请求；allowed_scopes由当前管理调试身份显式提供。"""
+    """检索调试请求；7A可独立对比Vector与BM25通道。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -107,6 +108,7 @@ class KnowledgeRetrievalRequest(BaseModel):
         max_length=32,
     )
     history: tuple[ChatMessage, ...] = Field(default=(), max_length=20)
+    retrieval_mode: RetrievalMode = RetrievalMode.VECTOR
     child_top_k: int = Field(default=20, ge=1, le=100)
     parent_top_k: int = Field(default=5, ge=1, le=20)
 
@@ -121,8 +123,8 @@ class KnowledgeRetrievalRequest(BaseModel):
     @field_validator("allowed_scopes")
     @classmethod
     def scopes_must_be_unique_and_safe(
-        cls,
-        value: tuple[str, ...],
+            cls,
+            value: tuple[str, ...],
     ) -> tuple[str, ...]:
         normalized = tuple(dict.fromkeys(scope.strip() for scope in value))
         if any(not scope or len(scope) > 64 for scope in normalized):
@@ -131,7 +133,7 @@ class KnowledgeRetrievalRequest(BaseModel):
 
 
 class RetrievalChildHitView(BaseModel):
-    """经过Milvus召回和MySQL二次复核的Child候选。"""
+    """经过召回和MySQL二次复核的Child候选。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -140,6 +142,7 @@ class RetrievalChildHitView(BaseModel):
     document_id: str
     document_version_id: str
     index_version_id: str
+    source: RetrievalSource
     score: float
 
 
@@ -159,12 +162,13 @@ class RetrievalParentView(BaseModel):
 
 
 class KnowledgeRetrievalView(BaseModel):
-    """6C检索调试输出；展示Rewrite、活动索引、Child和Parent两级结果。"""
+    """检索调试输出；展示通道、Rewrite、活动索引、Child和Parent。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     rewrite: QueryRewriteResult
-    embedding_model: str
+    retrieval_mode: RetrievalMode
+    embedding_model: str | None
     active_index_version_ids: tuple[str, ...]
     child_hits: tuple[RetrievalChildHitView, ...]
     parents: tuple[RetrievalParentView, ...]

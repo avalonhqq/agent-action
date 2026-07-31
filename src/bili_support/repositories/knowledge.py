@@ -296,6 +296,28 @@ class KnowledgeRepository:
         )
         return list(result)
 
+    async def child_chunks_for_versions(
+        self,
+        document_version_ids: list[str],
+    ) -> list[KnowledgeChunk]:
+        """批量读取活动版本的全部Child，供单进程BM25索引构建。
+
+        第7周MVP以索引版本ID缓存不可变语料；超大知识库应替换为OpenSearch等外部词法索引，
+        但上层仍使用相同候选契约。
+        """
+
+        if not document_version_ids:
+            return []
+        result = await self._session.scalars(
+            select(KnowledgeChunk)
+            .where(
+                KnowledgeChunk.version_id.in_(document_version_ids),
+                KnowledgeChunk.kind == "child",
+            )
+            .order_by(KnowledgeChunk.version_id, KnowledgeChunk.ordinal)
+        )
+        return list(result)
+
     async def list_index_versions(
         self,
         document_version_id: str,

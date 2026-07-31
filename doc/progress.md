@@ -9,8 +9,8 @@
 | 3   | Web 服务、会话、网站           | 已完成 | 2026-07-19 | 2026-07-20 | 106 项全量测试；MySQL/Redis、迁移、持久化会话、简单鉴权、SSE 和 NiceGUI  |
 | 4   | 意图识别与结构化决策             | 已完成 | 2026-07-21 | 2026-07-25 | hybrid_v3；48 条真实复验；路由/澄清 100%，高风险漏判 0%              |
 | 5   | RAG 知识表示与 Chunk        | 已完成 | 2026-07-25 | 2026-07-28 | 结构化分块、Small-to-Big、固定数据集与可解释Chunk评估               |
-| 6   | Embedding 与向量检索        | 进行中 | 2026-07-28 |            | Embedding 契约、Hash Mock、Milvus HNSW/COSINE 边界          |
-| 7   | 混合检索、Rerank 与策略        | 未开始 |            |            | BM25、RRF、Reranker、策略和覆盖评估                          |
+| 6   | Embedding 与向量检索        | 已完成 | 2026-07-28 | 2026-07-31 | Milvus索引/检索、Small-to-Big；10条真实评估Recall@5 100%       |
+| 7   | 混合检索、Rerank 与策略        | 进行中 | 2026-07-31 |            | 7A中文BM25基线已完成；下一步RRF融合                            |
 | 8   | 证据生成与 RAG 评估           | 未开始 |            |            | Grounded Prompt、引用、拒答和 Faithfulness                |
 | 9   | LangGraph 状态化工作流       | 未开始 |            |            | 可回放、可恢复、有限步的模型工作流                                  |
 | 10  | 多 Agent 与 Tool Calling | 未开始 |            |            | 路由、拆解、工具选择、确认和聚合                                   |
@@ -85,7 +85,16 @@
 | 6A | Embedding 契约与 Milvus 边界 | 已完成 | Mock 可复现；Collection、HNSW/COSINE、过滤与真实读写可用 |
 | 6B | 批量索引、索引版本与安全切换 | 已完成 | Child 分页批量写入；失败可重试；MySQL 原子切换活动版本 |
 | 6C | 向量检索与 Small-to-Big | 已完成 | Rewrite、活动索引/权限过滤、MySQL复核与Parent还原 |
-| 6D | Golden Dataset 与 Recall@K | 下一步 | 输出 Recall@1/3/5、延迟与可定位失败样本 |
+| 6D | Golden Dataset 与 Recall@K | 已完成 | 8正2负；R@1/3/5=75%/87.5%/100%；定位域内无答案误召回 |
+
+## 第 7 周新安排
+
+| Step | 内容 | 状态 | 验收目标 |
+|---|---|---|---|
+| 7A | 中文Tokenizer与BM25单路基线 | 已完成 | 活动Child词法召回、统一复核/Parent恢复；与Vector固定集对比 |
+| 7B | Vector + BM25 RRF融合 | 下一步 | 保留来源排名、去重融合，比较Recall@K/MRR |
+| 7C | 批量Reranker与降级 | 未开始 | 重排失败回退RRF，不伪造分数 |
+| 7D | RetrievalPolicy、阈值与覆盖 | 未开始 | 意图驱动预算；无答案拒答；多实体覆盖可评估 |
 
 ## 每周复盘模板
 

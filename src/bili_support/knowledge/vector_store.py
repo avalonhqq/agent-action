@@ -33,8 +33,8 @@ class VectorRecord(BaseModel):
     @field_validator("access_scope")
     @classmethod
     def access_scope_must_be_unique(
-        cls,
-        value: tuple[str, ...],
+            cls,
+            value: tuple[str, ...],
     ) -> tuple[str, ...]:
         """权限标签去空白并保持首次顺序，防止重复字段浪费ARRAY容量。"""
 
@@ -76,8 +76,8 @@ class VectorSearchQuery(BaseModel):
     @field_validator("allowed_scopes", "version_ids", "index_version_ids")
     @classmethod
     def filter_values_must_be_safe(
-        cls,
-        value: tuple[str, ...],
+            cls,
+            value: tuple[str, ...],
     ) -> tuple[str, ...]:
         """过滤值由适配器转义；类型层仍拒绝空值和异常长字符串。"""
 
@@ -147,10 +147,10 @@ class _MilvusClientProtocol(Protocol):
     def list_collections(self) -> list[str]: ...
 
     def create_schema(
-        self,
-        *,
-        auto_id: bool,
-        enable_dynamic_field: bool,
+            self,
+            *,
+            auto_id: bool,
+            enable_dynamic_field: bool,
     ) -> Any: ...
 
     def prepare_index_params(self) -> Any: ...
@@ -158,10 +158,10 @@ class _MilvusClientProtocol(Protocol):
     def create_collection(self, **kwargs: object) -> None: ...
 
     def upsert(
-        self,
-        *,
-        collection_name: str,
-        data: list[dict[str, object]],
+            self,
+            *,
+            collection_name: str,
+            data: list[dict[str, object]],
     ) -> object: ...
 
     def search(self, **kwargs: object) -> list[list[dict[str, object]]]: ...
@@ -175,17 +175,17 @@ class MilvusVectorStore:
     """使用Milvus 2.6 MilvusClient的异步适配器；阻塞SDK调用转移到线程。"""
 
     def __init__(
-        self,
-        *,
-        uri: str,
-        token: str,
-        collection_name: str,
-        dimension: int,
-        index_m: int = 16,
-        index_ef_construction: int = 200,
-        search_ef: int = 64,
-        consistency_level: str = "Session",
-        client: _MilvusClientProtocol | None = None,
+            self,
+            *,
+            uri: str,
+            token: str,
+            collection_name: str,
+            dimension: int,
+            index_m: int = 16,
+            index_ef_construction: int = 200,
+            search_ef: int = 64,
+            consistency_level: str = "Session",
+            client: _MilvusClientProtocol | None = None,
     ) -> None:
         if dimension < 2:
             raise ValueError("Milvus vector dimension must be at least 2")
@@ -357,8 +357,8 @@ class MilvusVectorStore:
             self._client.delete,
             collection_name=self._collection_name,
             filter=(
-                "index_version_id == "
-                + json.dumps(normalized, ensure_ascii=False)
+                    "index_version_id == "
+                    + json.dumps(normalized, ensure_ascii=False)
             ),
         )
 
@@ -422,11 +422,11 @@ def _parse_hit(row: dict[str, object]) -> VectorSearchHit:
     version_id = entity.get("version_id")
     index_version_id = entity.get("index_version_id")
     if (
-        not isinstance(chunk_id, str)
-        or not isinstance(score, int | float)
-        or not isinstance(document_id, str)
-        or not isinstance(version_id, str)
-        or not isinstance(index_version_id, str)
+            not isinstance(chunk_id, str)
+            or not isinstance(score, int | float)
+            or not isinstance(document_id, str)
+            or not isinstance(version_id, str)
+            or not isinstance(index_version_id, str)
     ):
         raise ValueError("Milvus search hit has invalid field types")
     return VectorSearchHit(
