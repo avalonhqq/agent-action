@@ -100,12 +100,12 @@ def test_user_can_continue_history_and_cannot_read_another_user_thread(
 
         first = client.post(
             f"/api/v1/conversations/{thread_id}/messages",
-            json={"content": "移动大王卡支持免流吗？"},
+            json={"content": "你好"},
             headers=_headers(request_id="message-1"),
         )
         second = client.post(
             f"/api/v1/conversations/{thread_id}/messages",
-            json={"content": "那联通呢"},
+            json={"content": "hello"},
             headers=_headers(request_id="message-2"),
         )
         history = client.get(
@@ -171,12 +171,12 @@ def test_stream_is_persisted_and_database_survives_app_restart(tmp_path: Path) -
         thread_id = created.json()["data"]["thread_id"]
         streamed = client.post(
             f"/api/v1/conversations/{thread_id}/messages/stream",
-            json={"content": "请测试流式"},
+            json={"content": "你好"},
             headers=_headers(request_id="stream-persist-1"),
         )
     assert "event: delta" in streamed.text
     assert "event: route" in streamed.text
-    assert '"target": "knowledge_mock"' in streamed.text
+    assert '"target": "general_chat"' in streamed.text
     assert "event: completed" in streamed.text
 
     second_app = create_app(settings)
@@ -187,7 +187,7 @@ def test_stream_is_persisted_and_database_survives_app_restart(tmp_path: Path) -
 
     assert history.status_code == 200
     assert [item["content"] for item in history.json()["data"]] == [
-        "请测试流式",
+        "你好",
         "流式持久化",
     ]
     with sqlite3.connect(database_path) as connection:
@@ -195,7 +195,7 @@ def test_stream_is_persisted_and_database_survives_app_restart(tmp_path: Path) -
             "SELECT operation, status FROM model_calls WHERE request_id = ?",
             ("stream-persist-1",),
         ).fetchone()
-    assert call == ("stream:knowledge_mock", "success")
+    assert call == ("stream:general_chat", "success")
 
 
 def test_model_failure_preserves_user_message_and_auditable_error(tmp_path: Path) -> None:
@@ -209,7 +209,7 @@ def test_model_failure_preserves_user_message_and_auditable_error(tmp_path: Path
         thread_id = created.json()["data"]["thread_id"]
         failed = client.post(
             f"/api/v1/conversations/{thread_id}/messages",
-            json={"content": "请回答"},
+            json={"content": "你好"},
             headers=_headers(request_id="failed-call-1"),
         )
         history = client.get(
@@ -228,6 +228,39 @@ def test_model_failure_preserves_user_message_and_auditable_error(tmp_path: Path
     assert call[0:2] == ("error", "MODEL_UNAVAILABLE")
     assert call[2] is not None
     assert call[3] is None
+
+
+def test_knowledge_route_without_evidence_does_not_call_free_model(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "no-evidence.db"
+    app = create_app(_settings(database_path), llm_provider=_UnavailableProvider())
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/conversations",
+            json={"title": "无证据保护"},
+            headers=_headers(),
+        )
+        thread_id = created.json()["data"]["thread_id"]
+        response = client.post(
+            f"/api/v1/conversations/{thread_id}/messages",
+            json={"content": "会员权益说明"},
+            headers=_headers(request_id="no-evidence-1"),
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["routing"]["target"] == "knowledge_rag"
+    assert data["routing"]["retrieval"]["evidence_count"] == 0
+    assert "没有找到足够依据" in data["answer"]
+    with sqlite3.connect(database_path) as connection:
+        call = connection.execute(
+            "SELECT operation, model, total_tokens FROM model_calls "
+            "WHERE request_id = ?",
+            ("no-evidence-1",),
+        ).fetchone()
+    assert call == ("complete:knowledge_rag", "deterministic-knowledge", 0)
 
 
 def test_unsafe_route_skips_answer_model_and_is_auditable(tmp_path: Path) -> None:

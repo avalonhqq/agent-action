@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from bili_support.intent.types import BusinessDomain
 from bili_support.knowledge.chunking import ChunkDraft, DocumentKnowledgeType
-from bili_support.knowledge.retrieval import RetrievalMode, RetrievalSource
+from bili_support.knowledge.reranking import RerankTrace
+from bili_support.knowledge.retrieval import (
+    RetrievalChannelEvidence,
+    RetrievalMode,
+    RetrievalSource,
+)
 from bili_support.knowledge.types import LoadedSourceBlock
 from bili_support.llm.context import QueryRewriteResult
 from bili_support.llm.types import ChatMessage
@@ -96,7 +102,7 @@ class KnowledgeIndexingView(BaseModel):
 
 
 class KnowledgeRetrievalRequest(BaseModel):
-    """检索调试请求；7A可独立对比Vector与BM25通道。"""
+    """检索调试请求；可独立运行Vector、BM25或RRF Hybrid通道。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -111,6 +117,8 @@ class KnowledgeRetrievalRequest(BaseModel):
     retrieval_mode: RetrievalMode = RetrievalMode.VECTOR
     child_top_k: int = Field(default=20, ge=1, le=100)
     parent_top_k: int = Field(default=5, ge=1, le=20)
+    rerank_enabled: bool = False
+    rerank_candidate_k: int = Field(default=10, ge=1, le=20)
 
     @field_validator("query")
     @classmethod
@@ -131,9 +139,15 @@ class KnowledgeRetrievalRequest(BaseModel):
             raise ValueError("allowed scopes must contain 1-64 characters")
         return normalized
 
+    @model_validator(mode="after")
+    def rerank_budget_must_cover_final_parents(self) -> Self:
+        if self.rerank_enabled and self.rerank_candidate_k < self.parent_top_k:
+            raise ValueError("rerank_candidate_k must be at least parent_top_k")
+        return self
+
 
 class RetrievalChildHitView(BaseModel):
-    """经过召回和MySQL二次复核的Child候选。"""
+    """经过召回和MySQL二次复核的Child候选及可解释融合证据。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -144,6 +158,7 @@ class RetrievalChildHitView(BaseModel):
     index_version_id: str
     source: RetrievalSource
     score: float
+    channel_evidence: tuple[RetrievalChannelEvidence, ...] = ()
 
 
 class RetrievalParentView(BaseModel):
@@ -159,6 +174,9 @@ class RetrievalParentView(BaseModel):
     matched_child_ids: tuple[str, ...]
     best_child_score: float
     first_child_rank: int = Field(ge=1)
+    pre_rerank_rank: int = Field(ge=1)
+    rerank_rank: int | None = Field(default=None, ge=1)
+    rerank_score: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class KnowledgeRetrievalView(BaseModel):
@@ -175,6 +193,9 @@ class KnowledgeRetrievalView(BaseModel):
     incompatible_index_count: int = Field(ge=0)
     discarded_child_count: int = Field(ge=0)
     discarded_parent_count: int = Field(ge=0)
+    degraded: bool = False
+    failed_sources: tuple[RetrievalSource, ...] = ()
+    reranking: RerankTrace
 
 
 class KnowledgeChunkView(BaseModel):

@@ -1,0 +1,719 @@
+{
+  "dataset": "retrieval_dev_v1.jsonl",
+  "case_count": 10,
+  "retrieval_mode": "bm25",
+  "bm25_tokenizer": "bigram",
+  "embedding_model": null,
+  "rerank_enabled": false,
+  "rerank_provider": null,
+  "rerank_model": null,
+  "metrics": {
+    "recall_at_1": 0.625,
+    "recall_at_3": 1.0,
+    "recall_at_5": 1.0,
+    "mrr_at_5": 0.7708333333333334,
+    "negative_accuracy": 0.5,
+    "execution_failure_rate": 0.0,
+    "rerank_degradation_rate": 0.0,
+    "latency_p50_ms": 8.862000016961247,
+    "latency_p95_ms": 39.290100015932694,
+    "positive_case_count": 8,
+    "negative_case_count": 2
+  },
+  "cases": [
+    {
+      "case": {
+        "case_id": "membership_activation_001",
+        "question": "钱已经付了，大会员一般什么时候能生效？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "activation_time_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "正常情况下支付成功后立即生效",
+              "超过30分钟"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "paraphrase"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "02b0a8ea-0c02-4ded-82f1-49e3f6df1f73",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：我刚刚付了钱，为什么还不是大会员？",
+          "score": 14.947568500644865,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "4ee88337-c05f-42fa-a1cd-4aec42680493",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：开了大会员为什么电视端还是不能看？",
+          "score": 8.764033708454871,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "97f574da-eca8-4edf-ad9c-0f61d91adea9",
+          "document_title": "大会员开通说明",
+          "content": "问题：大会员开通后多久生效？\n答案：正常情况下支付成功后立即生效。若未显示，请刷新或重新登录，等待1～5分钟；超过30分钟仍未到账时提交订单信息人工核查。",
+          "score": 7.814365188358391,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "005aba21-7eb2-4849-8972-296d352fbd37",
+          "document_title": "大会员开通说明",
+          "content": "标题：9. 退款与取消规则\n政策条款：大会员属于即时生效的数字化服务。测试规则中，会员权益一旦成功开通并生效，通常不支持无理由退款。以下情况可进入人工核查，但不保证一定退款：\n系统异常导致同一账号同一套餐重复扣费；\n支付成功但权益长时间未到账，且无法补发；\n未成年人未经监护人同意购买，并能提供必要证明；\n因系统错误导致套餐、金额或账号与确认页面不一致；\n法律法规要求处理的其他情形。\n以下情况通常不支持退款：用户主观改变购买意愿、已使用会员专享权益、充错账号但支付前页面已明确展示账号、因设备或网络问题暂时无法播放、用户忘记取消自动续费但扣费流程正常。",
+          "score": 7.224490167107643,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "710b4ac0-4c23-44cb-aa78-b3290b146016",
+          "document_title": "大会员开通说明",
+          "content": "标题：1. 大会员服务简介\n政策条款：bilibili 大会员是面向平台注册用户提供的增值会员服务。本测试文档假设大会员可提供高清视频、部分会员专享内容、缓存下载、装扮权益及会员活动等能力。\n用户开通后，会员权益通常绑定至开通时登录的账号，不支持在不同账号之间直接转移。用户应在支付前确认账号昵称、UID、套餐类型及支付金额。",
+          "score": 5.668631108874266,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "activation_time_faq"
+      ],
+      "recall_at_1": 0.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "latency_ms": 39.290100015932694,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_price_001",
+        "question": "大会员连续包月和年度套餐到底多少钱？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "membership_price_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "价格均为测试数据",
+              "购买结算页面"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "price"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "25d40565-666d-4266-a4ea-37c66d52eb7d",
+          "document_title": "大会员开通说明",
+          "content": "标题：4. 开通方式与操作步骤 > 4.1 手机客户端开通\n操作手册：1.  打开客户端并登录目标账号。\n2.  进入“我的”页面，找到“大会员”入口。\n3.  选择套餐，例如连续包月、单月、季度或年度套餐。\n4.  核对账号信息、套餐名称、有效期、优惠和实付金额。\n5.  选择支付方式并完成支付验证。\n6.  支付成功后返回会员页面，刷新并查看“大会员有效期”。",
+          "score": 23.464605473166348,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "b3b1669a-faef-4c45-96b0-2a0c697103a8",
+          "document_title": "大会员开通说明",
+          "content": "问题：连续包月怎么取消？\n答案：进入大会员中心或原支付渠道的订阅管理，找到对应签约并取消。取消后当前周期仍可使用，到期后不再续费。",
+          "score": 17.852327885322126,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "f6b04485-61e6-45c0-8662-20198c8c80da",
+          "document_title": "大会员开通说明",
+          "content": "问题：开通大会员需要多少钱？\n答案：本文中的连续包月、单月、季度和年度价格均为测试数据。真实价格及优惠以购买结算页面显示为准。",
+          "score": 17.795688714103935,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "7453c68a-6447-4af3-a410-859ac47aafb2",
+          "document_title": "大会员开通说明",
+          "content": "标题：7. 自动续费管理\n政策条款：连续包月套餐默认包含自动续费。用户购买时应阅读续费协议，确认首次扣费金额、后续扣费金额、扣费周期和取消方式。",
+          "score": 16.8861347373745,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "c8db9cdd-7de6-4088-9d88-1c8a69729fe2",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：连续包月取消后会员马上失效吗？",
+          "score": 15.326635259924014,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "membership_price_faq"
+      ],
+      "recall_at_1": 0.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.3333333333333333,
+      "latency_ms": 9.687400015536696,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_cancel_001",
+        "question": "不想继续自动扣费，在哪里关闭连续包月？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "cancel_subscription_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "原支付渠道的订阅管理",
+              "到期后不再续费"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "subscription"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "b3b1669a-faef-4c45-96b0-2a0c697103a8",
+          "document_title": "大会员开通说明",
+          "content": "问题：连续包月怎么取消？\n答案：进入大会员中心或原支付渠道的订阅管理，找到对应签约并取消。取消后当前周期仍可使用，到期后不再续费。",
+          "score": 20.001191386903677,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "db7b63a1-50f2-4225-8c22-415f31a74039",
+          "document_title": "大会员开通说明",
+          "content": "标题：3. 套餐类型与测试价格\n表格：第1行：套餐名称=连续包月；测试价格=首月¥15，后续¥25/月；有效期=每31天为一个周期；是否自动续费=是；适合场景=希望持续使用且接受自动扣费\n第2行：套餐名称=单月大会员；测试价格=¥25；有效期=31天；是否自动续费=否；适合场景=短期体验或临时观看\n第3行：套餐名称=季度大会员；测试价格=¥68；有效期=93天；是否自动续费=否；适合场景=阶段性集中使用\n第4行：套餐名称=年度大会员；测试价格=¥148；有效期=366天；是否自动续费=否；适合场景=长期使用且希望减少重复购买\n第5行：套餐名称=兑换码开通；测试价格=以兑换码标注为准；有效期=以兑换码标注为准；是否自动续费=否；适合场景=活动赠送或企业测试场景",
+          "score": 17.21472827243797,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "7453c68a-6447-4af3-a410-859ac47aafb2",
+          "document_title": "大会员开通说明",
+          "content": "标题：7. 自动续费管理\n政策条款：连续包月套餐默认包含自动续费。用户购买时应阅读续费协议，确认首次扣费金额、后续扣费金额、扣费周期和取消方式。",
+          "score": 16.776072112106757,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "e95770cb-16fe-461e-9d8d-5598f6b55c2c",
+          "document_title": "大会员开通说明",
+          "content": "标题：7. 自动续费管理 > 7.1 取消自动续费\n操作手册：1.  进入“大会员中心”或“订阅管理”；\n2.  找到“连续包月”或对应订阅；\n3.  选择“取消自动续费”；\n4.  根据页面提示完成身份验证；\n5.  确认页面显示“已取消”或“到期后不再续费”。\n取消自动续费不会立即取消当前已生效的会员权益。当前周期仍可使用至有效期结束，到期后不再自动扣费。",
+          "score": 14.822117439836823,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "c8db9cdd-7de6-4088-9d88-1c8a69729fe2",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：连续包月取消后会员马上失效吗？",
+          "score": 14.14841716105633,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "cancel_subscription_faq"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "latency_ms": 8.52519998443313,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_uninstall_001",
+        "question": "我把客户端卸载了，下个月是不是就不会扣钱了？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "uninstall_charge_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "卸载客户端不等于取消自动续费",
+              "确认订阅已取消"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "boundary"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "c6dcd449-3709-464a-b586-635e46bfee1b",
+          "document_title": "大会员开通说明",
+          "content": "问题：卸载客户端后还会扣费吗？\n答案：可能会。卸载客户端不等于取消自动续费，必须在会员中心或原支付渠道确认订阅已取消。",
+          "score": 18.590045771406707,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "b88e54ef-2990-4451-b96c-c9968734fced",
+          "document_title": "大会员开通说明",
+          "content": "标题：7. 自动续费管理 > 7.2 第三方渠道取消\n政策条款：若订阅通过苹果、安卓应用商店、支付宝、微信或其他支付渠道签约，可能需要在对应渠道的“订阅/扣费服务”页面取消。仅卸载客户端或退出账号，不能视为已取消自动续费。",
+          "score": 10.353564741587217,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "b84bbe6c-9399-4102-96ec-406805abc075",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：卸载哔哩哔哩以后还会继续扣钱吗？",
+          "score": 10.06519876801028,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "6b24bf2a-d8d1-44b9-a5b8-abae1355ae36",
+          "document_title": "大会员开通说明",
+          "content": "标题：12. 标准客服话术 > 12.3 取消自动续费\n表格：第1行：推荐回复=您好，连续包月需要在大会员中心或原支付渠道的订阅管理中取消。取消成功后，当前会员权益不会立即失效，仍可使用到本周期结束。仅卸载客户端或退出账号不会自动取消续费。",
+          "score": 9.945694358566938,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "25d40565-666d-4266-a4ea-37c66d52eb7d",
+          "document_title": "大会员开通说明",
+          "content": "标题：4. 开通方式与操作步骤 > 4.1 手机客户端开通\n操作手册：1.  打开客户端并登录目标账号。\n2.  进入“我的”页面，找到“大会员”入口。\n3.  选择套餐，例如连续包月、单月、季度或年度套餐。\n4.  核对账号信息、套餐名称、有效期、优惠和实付金额。\n5.  选择支付方式并完成支付验证。\n6.  支付成功后返回会员页面，刷新并查看“大会员有效期”。",
+          "score": 9.479224759505602,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "uninstall_charge_faq"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "latency_ms": 8.217999973567203,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_wrong_account_001",
+        "question": "会员充错UID了，可以转给另一个账号吗？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "wrong_account_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "会员权益绑定开通账号",
+              "不支持转移"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "account"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "a1ce2300-6eb8-494d-9c1f-a5ea1034ba45",
+          "document_title": "大会员开通说明",
+          "content": "问题：买错账号可以转到另一个账号吗？\n答案：测试规则中会员权益绑定开通账号，通常不支持转移。支付前应核对昵称和UID。",
+          "score": 39.3798503611904,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "9b4b2205-3610-4251-8d2f-8ebf2cb099a6",
+          "document_title": "大会员开通说明",
+          "content": "标题：12. 标准客服话术 > 12.5 充错账号\n表格：第1行：推荐回复=您好，大会员权益通常绑定至开通时登录的账号，测试规则中不支持直接转移。请提供支付订单、充值账号UID和目标账号UID，我们可以先为您核查具体订单情况。",
+          "score": 11.001714173418522,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "e12c5042-bb23-435f-93a7-9060961e8148",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录A：解析测试关键词与意图标签\n表格：第1行：意图标签=MEMBER_OPEN；典型表达=怎么开会员、开通大会员、购买会员；关键实体=套餐、账号、支付方式；推荐知识章节=第3、4章\n第2行：意图标签=MEMBER_PRICE；典型表达=多少钱、年费多少、包月价格；关键实体=套餐类型、金额、优惠；推荐知识章节=第3章\n第3行：意图标签=MEMBER_NOT_ARRIVED；典型表达=支付成功没到账、会员没生效；关键实体=订单号、UID、支付时间；推荐知识章节=第6、8、10章\n第4行：意图标签=AUTO_RENEW_CANCEL；典型表达=取消续费、关闭自动扣费；关键实体=支付渠道、订阅状态；推荐知识章节=第7章\n第5行：意图标签=REFUND_REQUEST；典型表达=我要退款、重复扣费、未成年退款；关键实体=订单、支付流水、退款原因；推荐知识章节=第9章\n第6行：意图标签=WRONG_ACCOUNT；典型表达=充错账号、开到小号、转移会员；关键实体=源UID、目标UID；推荐知识章节=第4、9、12章\n第7行：意图标签=RIGHTS_UNAVAILABLE；典型表达=会员看不了、画质没有、缓存失效；关键实体=内容ID、设备、客户端版本；推荐知识章节=第5、10章\n第8行：意图标签=REDEEM_CODE；典型表达=兑换码无效、兑换码已使用；关键实体=兑换码、来源、有效期；推荐知识章节=第4、11章\n第9行：意图标签=HUMAN_SERVICE；典型表达=转人工、找客服、提交工单；关键实体=账号、订单、截图；推荐知识章节=第10、11章",
+          "score": 9.253226141673473,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "43d2b5b7-ebba-412a-b176-d4b17aaf182c",
+          "document_title": "大会员开通说明",
+          "content": "标题：4. 开通方式与操作步骤 > 4.3 兑换码开通\n表格：第1行：防止充错账号=支付前必须确认当前账号。若通过第三方渠道购买，也应确认其是否要求填写UID、手机号或账号信息。测试规则中，充值完成后通常不支持将权益转移至其他账号。",
+          "score": 6.5611043430925715,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "51b74b5b-0442-4a70-994c-b8b22e69c6ea",
+          "document_title": "大会员开通说明",
+          "content": "标题：2. 开通前准备\n正文：开通大会员前，建议用户完成以下检查，以减少充错账号、重复支付或权益未到账等问题。",
+          "score": 6.33666376296893,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "wrong_account_faq"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "latency_ms": 8.862000016961247,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_refund_001",
+        "question": "大会员刚开通，能不能直接无理由退款？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "refund_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "不支持无理由退款",
+              "重复扣费"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "refund"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "cb30e93e-c39d-44a3-9122-1680b736d8b8",
+          "document_title": "大会员开通说明",
+          "content": "问题：大会员可以退款吗？\n答案：会员属于即时生效数字服务，成功开通后通常不支持无理由退款。重复扣费、系统错误等情况可提交人工核查。",
+          "score": 26.78381351594748,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "005aba21-7eb2-4849-8972-296d352fbd37",
+          "document_title": "大会员开通说明",
+          "content": "标题：9. 退款与取消规则\n政策条款：大会员属于即时生效的数字化服务。测试规则中，会员权益一旦成功开通并生效，通常不支持无理由退款。以下情况可进入人工核查，但不保证一定退款：\n系统异常导致同一账号同一套餐重复扣费；\n支付成功但权益长时间未到账，且无法补发；\n未成年人未经监护人同意购买，并能提供必要证明；\n因系统错误导致套餐、金额或账号与确认页面不一致；\n法律法规要求处理的其他情形。\n以下情况通常不支持退款：用户主观改变购买意愿、已使用会员专享权益、充错账号但支付前页面已明确展示账号、因设备或网络问题暂时无法播放、用户忘记取消自动续费但扣费流程正常。",
+          "score": 22.637433184123037,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "8991d803-d22c-4b5a-98b5-d0648bba54ef",
+          "document_title": "大会员开通说明",
+          "content": "标题：12. 标准客服话术 > 12.4 退款咨询\n表格：第1行：推荐回复=您好，大会员属于即时生效的数字服务，成功开通后通常不支持无理由退款。若您遇到重复扣费、权益未到账或系统异常，请提供订单号、支付流水和相关截图，我们将为您提交人工核查。",
+          "score": 17.094742485103026,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "ad76da8a-5ee8-484a-b9c4-e6f69008acb8",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：我忘记取消续费，能不能退款？",
+          "score": 13.28512098819672,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "af780cea-1f83-48fc-9a2c-da5893be7fff",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：会员到期后以前缓存的视频还能不能看？",
+          "score": 9.959568559553851,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "refund_faq"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "latency_ms": 9.59500001044944,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_missing_001",
+        "question": "订单显示付款成功，但账号里还是没有大会员，怎么处理？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "missing_membership_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "核对支付状态、账号、订单和UID",
+              "订单号和支付流水"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "troubleshoot"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "44584c8f-c1e7-4853-8f3f-833b8f06a378",
+          "document_title": "大会员开通说明",
+          "content": "问题：支付成功但没有会员怎么办？\n答案：先核对支付状态、账号、订单和UID，再刷新或重新登录。超过30分钟仍未到账，请提供订单号和支付流水。",
+          "score": 14.509395793437754,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "4ee88337-c05f-42fa-a1cd-4aec42680493",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：开了大会员为什么电视端还是不能看？",
+          "score": 9.70134339159371,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "e12c5042-bb23-435f-93a7-9060961e8148",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录A：解析测试关键词与意图标签\n表格：第1行：意图标签=MEMBER_OPEN；典型表达=怎么开会员、开通大会员、购买会员；关键实体=套餐、账号、支付方式；推荐知识章节=第3、4章\n第2行：意图标签=MEMBER_PRICE；典型表达=多少钱、年费多少、包月价格；关键实体=套餐类型、金额、优惠；推荐知识章节=第3章\n第3行：意图标签=MEMBER_NOT_ARRIVED；典型表达=支付成功没到账、会员没生效；关键实体=订单号、UID、支付时间；推荐知识章节=第6、8、10章\n第4行：意图标签=AUTO_RENEW_CANCEL；典型表达=取消续费、关闭自动扣费；关键实体=支付渠道、订阅状态；推荐知识章节=第7章\n第5行：意图标签=REFUND_REQUEST；典型表达=我要退款、重复扣费、未成年退款；关键实体=订单、支付流水、退款原因；推荐知识章节=第9章\n第6行：意图标签=WRONG_ACCOUNT；典型表达=充错账号、开到小号、转移会员；关键实体=源UID、目标UID；推荐知识章节=第4、9、12章\n第7行：意图标签=RIGHTS_UNAVAILABLE；典型表达=会员看不了、画质没有、缓存失效；关键实体=内容ID、设备、客户端版本；推荐知识章节=第5、10章\n第8行：意图标签=REDEEM_CODE；典型表达=兑换码无效、兑换码已使用；关键实体=兑换码、来源、有效期；推荐知识章节=第4、11章\n第9行：意图标签=HUMAN_SERVICE；典型表达=转人工、找客服、提交工单；关键实体=账号、订单、截图；推荐知识章节=第10、11章",
+          "score": 8.678895731856876,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "3311dbe2-cbeb-4045-8bae-28f54f53131c",
+          "document_title": "大会员开通说明",
+          "content": "问题：付款页面价格和宣传页不一样怎么办？\n答案：先确认活动条件、账号资格和渠道限制。最终支付金额以结算页和支付确认页为准。",
+          "score": 8.188944793856258,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "8cf538ad-a5cc-48ec-8fa6-1751441c480c",
+          "document_title": "大会员开通说明",
+          "content": "标题：10. 常见故障处理\n表格：第1行：故障现象=支付成功但未到账；可能原因=订单同步延迟、登录账号错误；用户自助操作=刷新、重登、核对订单与UID；升级条件=超过30分钟\n第2行：故障现象=仍显示普通用户；可能原因=缓存未更新、客户端版本旧；用户自助操作=重启客户端、升级版本；升级条件=多端均异常\n第3行：故障现象=部分视频不能看；可能原因=内容不在权益范围、地区/版权限制；用户自助操作=查看内容页权益说明；升级条件=页面明确显示会员可看但仍失败\n第4行：故障现象=画质选项缺失；可能原因=设备、网络、内容源限制；用户自助操作=更换网络/设备、更新客户端；升级条件=同一内容持续异常\n第5行：故障现象=自动续费取消失败；可能原因=取消渠道错误、签约状态未同步；用户自助操作=前往原支付渠道取消；升级条件=仍显示有效签约\n第6行：故障现象=兑换码不可用；可能原因=已使用、过期、输入错误、渠道限制；用户自助操作=核对字符和有效期；升级条件=确认有效仍无法兑换",
+          "score": 8.156043574042366,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "missing_membership_faq"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 1.0,
+      "latency_ms": 10.140400001546368,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_video_001",
+        "question": "为什么已经是大会员了，某个番剧仍然播放不了？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [
+          {
+            "relevance_id": "video_unavailable_faq",
+            "document_title": "大会员开通说明",
+            "content_contains": [
+              "会员不代表所有内容均可观看",
+              "版权、地区、设备或账号限制"
+            ]
+          }
+        ],
+        "expect_empty": false,
+        "tags": [
+          "faq",
+          "content"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "02b0a8ea-0c02-4ded-82f1-49e3f6df1f73",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：我刚刚付了钱，为什么还不是大会员？",
+          "score": 19.467534482572688,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "7dd40e0b-547f-4649-8c25-61290c2c03a1",
+          "document_title": "大会员开通说明",
+          "content": "问题：为什么开了会员还是看不了某个视频？\n答案：会员不代表所有内容均可观看。应查看该内容是否属于会员权益，以及是否存在版权、地区、设备或账号限制。",
+          "score": 17.72931725879388,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "4ee88337-c05f-42fa-a1cd-4aec42680493",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：开了大会员为什么电视端还是不能看？",
+          "score": 13.122618686705678,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "ba74b37c-149a-46ed-a60c-51fab610dcb5",
+          "document_title": "大会员开通说明",
+          "content": "标题：附录B：建议测试问题\n正文：宣传页写15元，为什么支付时是25元？",
+          "score": 9.015072130287827,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "c417e1d8-b3bf-4f0f-b819-f103d37410e7",
+          "document_title": "大会员开通说明",
+          "content": "标题：5. 会员权益说明\n政策条款：高清播放权益：在支持的内容、设备和网络环境下，可选择更高画质或更高码率。\n会员专享内容：部分视频、番剧、纪录片或课程可能仅对会员开放，具体以内容详情页为准。\n缓存下载：部分内容支持离线缓存；下架、版权到期或会员失效后可能无法继续播放。\n音频与后台播放：部分客户端版本可能支持音频模式或后台播放。\n会员装扮与标识：可展示会员身份标识，部分装扮可能有单独使用期限。\n会员活动：可参与测试环境中的会员抽奖、积分、限时兑换等活动。\n权益可用范围可能受到内容版权、客户端版本、设备类型、网络条件、地区和账号状态影响。出现“已开通但某个视频仍不能看”的情况，不应直接判断会员未到账，应先核对该内容是否包含在会员权益范围内。",
+          "score": 6.073646266607841,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [
+        "video_unavailable_faq"
+      ],
+      "recall_at_1": 0.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "reciprocal_rank": 0.5,
+      "latency_ms": 9.862200007773936,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "technical_no_index_001",
+        "question": "客户端启动时一直闪退应该怎么办？",
+        "business_domain": "technical",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [],
+        "expect_empty": true,
+        "tags": [
+          "negative",
+          "domain_filter"
+        ]
+      },
+      "parents": [],
+      "matched_relevance_ids_at_5": [],
+      "recall_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "reciprocal_rank": 0.0,
+      "latency_ms": 2.5089000118896365,
+      "failures": [],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    },
+    {
+      "case": {
+        "case_id": "membership_unknown_ticket_001",
+        "question": "明天上海演唱会的门票在哪里购买？",
+        "business_domain": "membership",
+        "allowed_scopes": [
+          "public"
+        ],
+        "relevant_parents": [],
+        "expect_empty": true,
+        "tags": [
+          "negative",
+          "no_answer"
+        ]
+      },
+      "parents": [
+        {
+          "parent_chunk_id": "005aba21-7eb2-4849-8972-296d352fbd37",
+          "document_title": "大会员开通说明",
+          "content": "标题：9. 退款与取消规则\n政策条款：大会员属于即时生效的数字化服务。测试规则中，会员权益一旦成功开通并生效，通常不支持无理由退款。以下情况可进入人工核查，但不保证一定退款：\n系统异常导致同一账号同一套餐重复扣费；\n支付成功但权益长时间未到账，且无法补发；\n未成年人未经监护人同意购买，并能提供必要证明；\n因系统错误导致套餐、金额或账号与确认页面不一致；\n法律法规要求处理的其他情形。\n以下情况通常不支持退款：用户主观改变购买意愿、已使用会员专享权益、充错账号但支付前页面已明确展示账号、因设备或网络问题暂时无法播放、用户忘记取消自动续费但扣费流程正常。",
+          "score": 3.1677784214767226,
+          "rank": 1
+        },
+        {
+          "parent_chunk_id": "aa9e7b6a-2ce9-4ba8-b08e-24d9f68376e5",
+          "document_title": "大会员开通说明",
+          "content": "标题：8. 支付、订单与发票 > 8.2 重复扣费\n政策条款：如果用户发现同一时间段出现两笔或多笔扣费，应先核对是否购买了不同套餐、是否存在多个账号、是否为自动续费与手动购买同时发生。确认重复后，收集支付流水号和订单截图进行核查。",
+          "score": 3.124572480418736,
+          "rank": 2
+        },
+        {
+          "parent_chunk_id": "d898feeb-b2eb-480b-ac0c-cad34290a1de",
+          "document_title": "大会员开通说明",
+          "content": "标题：1. 大会员服务简介 > 1.1 适用用户\n政策条款：已注册并可正常登录的用户；\n账号未处于封禁、冻结或高风险状态；\n具备可用支付方式，或持有可兑换的大会员兑换码；\n未成年人应在监护人知情和同意的情况下购买。",
+          "score": 2.961238341698093,
+          "rank": 3
+        },
+        {
+          "parent_chunk_id": "7453c68a-6447-4af3-a410-859ac47aafb2",
+          "document_title": "大会员开通说明",
+          "content": "标题：7. 自动续费管理\n政策条款：连续包月套餐默认包含自动续费。用户购买时应阅读续费协议，确认首次扣费金额、后续扣费金额、扣费周期和取消方式。",
+          "score": 2.7243964171757815,
+          "rank": 4
+        },
+        {
+          "parent_chunk_id": "bc785b88-2315-4b26-986a-0a310e74054b",
+          "document_title": "大会员开通说明",
+          "content": "标题：6. 生效时间、有效期与设备规则 > 6.2 有效期计算\n政策条款：测试规则中，单月按31天、季度按93天、年度按366天计算。若用户在已有会员有效期内再次购买，通常会在原有效期基础上顺延；特殊活动套餐可能采用不同规则。",
+          "score": 2.522634348405637,
+          "rank": 5
+        }
+      ],
+      "matched_relevance_ids_at_5": [],
+      "recall_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "reciprocal_rank": 0.0,
+      "latency_ms": 7.711299986112863,
+      "failures": [
+        "unexpected_parent"
+      ],
+      "error_code": null,
+      "rerank_applied": false,
+      "rerank_degraded": false,
+      "rerank_error_code": null
+    }
+  ]
+}

@@ -4,6 +4,8 @@ from bili_support.models.base import Base
 from bili_support.models.entities import (
     Conversation,
     KnowledgeChunk,
+    KnowledgeDictionaryTerm,
+    KnowledgeDictionaryVersion,
     KnowledgeDocument,
     KnowledgeDocumentVersion,
     KnowledgeIndexJob,
@@ -21,6 +23,8 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeDocument",
     "KnowledgeDocumentVersion",
+    "KnowledgeDictionaryTerm",
+    "KnowledgeDictionaryVersion",
     "KnowledgeIngestionJob",
     "KnowledgeIndexJob",
     "KnowledgeIndexVersion",

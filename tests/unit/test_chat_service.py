@@ -45,6 +45,25 @@ async def test_complete_rewrites_reference_and_records_safe_usage() -> None:
     assert records[0].usage == result.response.usage
 
 
+@pytest.mark.asyncio
+async def test_grounded_complete_uses_evidence_prompt_instead_of_free_chat() -> None:
+    recorder = InMemoryUsageRecorder()
+    service = _service(MockLLMProvider(response_text="依据证据回答[E1]"), recorder)
+
+    result = await service.complete(
+        request_id="request-grounded",
+        user_message="会员权益说明",
+        history=[],
+        evidence_context=(
+            '{"evidence":[{"evidence_id":"E1",'
+            '"content":"会员权益受版权和设备限制"}]}'
+        ),
+    )
+
+    assert result.response.content == "依据证据回答[E1]"
+    assert result.prompt_version == "grounded_support:v1"
+
+
 class _UnavailableProvider:
     async def complete(self, request: LLMRequest) -> LLMResponse:
         raise LLMUnavailableError

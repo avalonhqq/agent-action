@@ -68,14 +68,25 @@ class ChatService:
     def prompt_version(self) -> str:
         return self._prompt_registry.get("support_answer").identifier
 
+    @property
+    def grounded_prompt_version(self) -> str:
+        """真实知识问答使用的不可变Prompt版本。"""
+
+        return self._prompt_registry.get("grounded_support").identifier
+
     async def complete(
         self,
         *,
         request_id: str,
         user_message: str,
         history: list[ChatMessage],
+        evidence_context: str | None = None,
     ) -> ChatCompletionResult:
-        request, rewrite, prompt_version = self._prepare(user_message, history)
+        request, rewrite, prompt_version = self._prepare(
+            user_message,
+            history,
+            evidence_context=evidence_context,
+        )
         started = perf_counter()
         try:
             response = await self._provider.complete(request)
@@ -133,8 +144,13 @@ class ChatService:
         request_id: str,
         user_message: str,
         history: list[ChatMessage],
+        evidence_context: str | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
-        request, _, prompt_version = self._prepare(user_message, history)
+        request, _, prompt_version = self._prepare(
+            user_message,
+            history,
+            evidence_context=evidence_context,
+        )
         started = perf_counter()
         usage = None
         status = UsageStatus.CANCELLED
@@ -165,10 +181,20 @@ class ChatService:
         self,
         user_message: str,
         history: list[ChatMessage],
+        *,
+        evidence_context: str | None = None,
     ) -> tuple[LLMRequest, QueryRewriteResult, str]:
         rewrite = self._rewriter.rewrite(user_message, history)
-        prompt = self._prompt_registry.get("support_answer")
-        rendered = prompt.render({"question": rewrite.standalone_query})
+        prompt_name = (
+            "grounded_support"
+            if evidence_context is not None
+            else "support_answer"
+        )
+        prompt = self._prompt_registry.get(prompt_name)
+        variables = {"question": rewrite.standalone_query}
+        if evidence_context is not None:
+            variables["evidence"] = evidence_context
+        rendered = prompt.render(variables)
         window = self._context_builder.build(
             system_message=rendered[0],
             history=history,

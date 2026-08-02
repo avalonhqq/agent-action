@@ -1,6 +1,9 @@
 # 当前学习入口
 
-前六周已经完成，第7周7A中文BM25基线已完成。当前下一步是7B：Vector + BM25 RRF融合。
+前七周已经完成。当前停在第8周开始前；下一模块先说明思路和任务，得到确认后再实施。
+
+第7周补充完成统一企业客服工作台：`/support/`现已覆盖问答、知识上传、领域词条、审核发布、
+版本制品和能力边界展示。
 
 任务目标、实现提示、思考题、问题记录和实现结论统一维护在：
 
@@ -15,5 +18,11 @@
 - [6D Golden Dataset 与 Recall@K](week6-learning-record.md#6-6dgolden-dataset-与-recallk已完成)
 - [第7周学习与任务记录](week7-learning-record.md)
 - [7A 中文Tokenizer与BM25基线](week7-learning-record.md#2-7a中文tokenizer与bm25单路基线已完成)
+- [7A-2 Jieba搜索分词优化](week7-learning-record.md#210-7a-2jieba搜索分词优化已完成)
+- [7A-3 生产级领域词典管理](week7-learning-record.md#211-7a-3生产级领域词典管理已完成)
+- [Chat接入真实RAG](week7-learning-record.md#3-chat接入真实rag已完成)
+- [7B Vector与BM25 RRF融合](week7-learning-record.md#4-7bvector--bm25-rrf融合已完成)
+- [7C Parent批量Rerank与失败降级](week7-learning-record.md#5-7cparent批量rerank与失败降级已完成)
+- [7D RetrievalPolicy、阈值与多实体覆盖](week7-learning-record.md#6-7dretrievalpolicy阈值与多实体覆盖已完成)
 
 本文只提供入口，不重复保存每周任务内容。

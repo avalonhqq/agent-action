@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -12,69 +11,13 @@ from bili_support.knowledge.retrieval import (
     ChildRetrievalCandidate,
     RetrievalSource,
 )
-
-_TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9_]+|[\u4e00-\u9fff]+")
-_DEFAULT_DOMAIN_TERMS = frozenset(
-    {
-        "大会员",
-        "连续包月",
-        "自动续费",
-        "订阅管理",
-        "支付成功",
-        "未到账",
-        "订单号",
-        "支付流水",
-        "无理由退款",
-        "重复扣费",
-        "会员权益",
-        "有效期",
-        "兑换码",
-        "电视端",
-        "客户端",
-        "版权限制",
-        "人工核查",
-        "账号",
-        "退款",
-        "扣费",
-        "套餐",
-        "视频",
-        "会员",
-    }
+from bili_support.knowledge.tokenizers import (
+    BigramSearchTokenizer,
+    SearchTokenizer,
 )
 
-
-class ChineseSearchTokenizer:
-    """领域词与字符二元组结合的确定性中文Tokenizer。
-
-    领域词保留“大会员/自动续费”等业务概念；二元组保证未登记新词仍能参与召回。
-    当前不做同义词扩展，确保7A测到的是纯词法基线。
-    """
-
-    def __init__(self, domain_terms: Iterable[str] = _DEFAULT_DOMAIN_TERMS) -> None:
-        normalized = {
-            term.strip().casefold() for term in domain_terms if term.strip()
-        }
-        self._domain_terms = tuple(
-            sorted(normalized, key=lambda item: (-len(item), item))
-        )
-
-    def tokenize(self, text: str) -> tuple[str, ...]:
-        """英文按词、中文按领域词和相邻二元组生成可重复Token序列。"""
-
-        tokens: list[str] = []
-        for span in _TOKEN_PATTERN.findall(text.casefold()):
-            if span.isascii():
-                tokens.append(span)
-                continue
-            tokens.extend(term for term in self._domain_terms if term in span)
-            if len(span) == 1:
-                tokens.append(span)
-            else:
-                tokens.extend(
-                    span[index : index + 2]
-                    for index in range(len(span) - 1)
-                )
-        return tuple(tokens)
+# 保留旧导入名，现有7A测试和Mock Reranker仍明确使用二元分词基线。
+ChineseSearchTokenizer = BigramSearchTokenizer
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +47,7 @@ class BM25Index:
         self,
         *,
         documents: Iterable[BM25Document],
-        tokenizer: ChineseSearchTokenizer,
+        tokenizer: SearchTokenizer,
         k1: float = 1.2,
         b: float = 0.75,
     ) -> None:

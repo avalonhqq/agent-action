@@ -179,7 +179,7 @@ python -m uvicorn bili_support.main:app --reload --host 127.0.0.1 --port 8010
 - 就绪检查：<http://127.0.0.1:8010/ready>
 - OpenAPI 文档：<http://127.0.0.1:8010/docs>
 - ReDoc：<http://127.0.0.1:8010/redoc>
-- NiceGUI 客服页：<http://127.0.0.1:8010/support/>
+- NiceGUI 企业客服工作台：<http://127.0.0.1:8010/support/>
 
 停止服务：在终端按 `Ctrl+C`。
 
@@ -267,7 +267,7 @@ Invoke-RestMethod -Method Post `
 - `GET /api/v1/knowledge/versions/{version_id}/indexes`：查看构建历史。
 - `GET /api/v1/knowledge/index-jobs/{job_id}`：查看任务状态和进度。
 - `POST /api/v1/knowledge/index-jobs/{job_id}/retry`：重试失败构建。
-- `POST /api/v1/knowledge/retrieve`：独立调试Vector/BM25 Child召回和Parent还原。
+- `POST /api/v1/knowledge/retrieve`：独立调试Vector、BM25或Hybrid RRF召回和Parent还原。
 
 每条Milvus记录包含 `index_version_id`。新版本全部写完后，MySQL在一个事务中把旧活动版本标记为
 `superseded`、把新版本标记为`active`；失败和构建中的向量不会进入后续检索。
@@ -279,7 +279,7 @@ $body = @{
   query = "大会员支付成功后多久生效？"
   business_domain = "membership"
   allowed_scopes = @("public")
-  retrieval_mode = "vector" # 改成bm25可运行中文词法基线
+  retrieval_mode = "hybrid" # 也可指定vector或bm25运行单路基线
   child_top_k = 10
   parent_top_k = 5
   history = @()
@@ -291,7 +291,7 @@ Invoke-RestMethod -Method Post `
 ```
 
 该接口属于知识运营调试入口：只搜索当前管理身份创建的知识，并将请求权限与文档权限取交集。
-正式客服链路后续会从受信任的身份/租户上下文生成权限范围，而不会接收终端用户自报权限。
+正式客服链路从受信任的身份/租户上下文生成权限范围，不接收终端用户自报权限。
 
 ## Linux/macOS 安装与启动
 
@@ -493,6 +493,39 @@ data/evaluation/chunk_report_v1.json
   --output-prefix data/evaluation/retrieval_bm25_report_v1
 ```
 
+对比二元分词与Jieba搜索分词时增加：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.retrieval_cli `
+  --mode bm25 `
+  --bm25-tokenizer jieba `
+  --output-prefix data/evaluation/retrieval_bm25_jieba_report_v1
+```
+
+`--bm25-tokenizer`可选`bigram`或`jieba`，报告会保存实际分词器，防止不同实验结果混淆。
+
+运行7B Hybrid RRF：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.retrieval_cli `
+  --mode hybrid `
+  --user-id demo-user `
+  --user-name "Demo User" `
+  --output-prefix data/evaluation/retrieval_hybrid_report_v1
+```
+
+运行7C Parent批量Rerank结构基线（默认确定性Mock，不调用真实模型）：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.retrieval_cli `
+  --mode hybrid `
+  --rerank `
+  --rerank-candidate-k 10 `
+  --user-id demo-user `
+  --user-name "Demo User" `
+  --output-prefix data/evaluation/retrieval_hybrid_rerank_mock_report_v1
+```
+
 安装项目后也可以运行：
 
 ```powershell
@@ -506,6 +539,10 @@ data/evaluation/retrieval_vector_report_v1.md
 data/evaluation/retrieval_vector_report_v1.json
 data/evaluation/retrieval_bm25_report_v1.md
 data/evaluation/retrieval_bm25_report_v1.json
+data/evaluation/retrieval_hybrid_report_v1.md
+data/evaluation/retrieval_hybrid_report_v1.json
+data/evaluation/retrieval_hybrid_rerank_mock_report_v1.md
+data/evaluation/retrieval_hybrid_rerank_mock_report_v1.json
 ```
 
 报告包含Recall@1/3/5、MRR@5、负例准确率、执行失败率、P50/P95及可定位失败样本。首版
@@ -531,6 +568,21 @@ BILI_SUPPORT_LLM_API_KEY=<你的本地密钥>
 ```text
 http://127.0.0.1:8010/support/
 ```
+
+工作台包含六个功能页签：
+
+| 页签 | 功能 |
+|---|---|
+| 工作台 | 展示当前支持的真实能力、Mock边界并跳转到操作页 |
+| 智能问答 | 新建会话、意图识别、Hybrid RAG和流式回答 |
+| 知识入库 | 上传PDF/DOCX/Markdown/TXT并查看数据库文档 |
+| 领域词条 | 创建带业务域、类型、别名、词频和来源的candidate |
+| 审核发布 | 批准/拒绝候选、发布词典版本、查看Jieba制品 |
+| 能力说明 | 区分真实链路与人工坐席、客服日志等Mock能力 |
+
+打开顶部“连接身份”填写本地Bearer Token和用户信息。领域词条页面的“写入候选词”会直接写入
+MySQL `knowledge_dictionary_terms`；审核和发布页面分别更新审核字段并创建
+`knowledge_dictionary_versions`不可变快照。
 
 在“请输入客服问题”中输入内容，点击“识别意图”，页面会展示顶层路由、子意图、实体、情绪、
 风险、置信度、来源和澄清问题。意图识别不会创建会话或写入消息；需要正式客服回答时再点击
@@ -564,9 +616,61 @@ BILI_SUPPORT_INTENT_PROMPT_VERSION=3
 
 正式发送消息也会经过同一个 `hybrid_v3` 实例。客服路由当前包括 `safety`、
 `out_of_scope`、`clarification`、`human_review_mock`、`human_service_mock`、
-`general_chat` 和 `knowledge_mock`。知识库与人工坐席尚未接入真实下游，名称和页面会明确显示
-Mock；不安全、领域外、澄清和高风险请求使用确定性回复，不继续调用通用回答模型。流式接口会在
-文本前发送 `event: route`。
+`general_chat` 和 `knowledge_rag`。普通低风险业务问题会按意图业务域调用真实
+`KnowledgeRetrievalService`，经过Milvus/BM25召回、MySQL复核和Small-to-Big后，将有界Parent
+证据交给`grounded_support:v1`回答。页面展示检索模式、证据数量和实际来源；无证据或检索故障时
+不会回退到自由模型。人工坐席仍是Mock；不安全、领域外、澄清和高风险请求使用确定性回复。
+流式接口会在文本前发送包含检索Trace的`event: route`。
+
+客服RAG通道可通过配置选择已完成评估的检索器：
+
+```dotenv
+BILI_SUPPORT_CUSTOMER_RETRIEVAL_MODE=hybrid
+BILI_SUPPORT_BM25_TOKENIZER=jieba
+BILI_SUPPORT_BM25_JIEBA_HMM_ENABLED=false
+BILI_SUPPORT_BM25_USER_DICTIONARY_PATH=./data/dictionaries/bilibili_support.txt
+BILI_SUPPORT_RERANK_PROVIDER=mock
+BILI_SUPPORT_RERANK_MODEL=mock-reranker-v1
+BILI_SUPPORT_RERANK_TIMEOUT_SECONDS=10
+BILI_SUPPORT_RERANK_MAX_CONCURRENCY=4
+BILI_SUPPORT_RERANK_CANDIDATE_K=10
+BILI_SUPPORT_CUSTOMER_RERANK_ENABLED=false
+```
+
+当前可选`vector`、`bm25`或`hybrid`。Hybrid并行运行Vector和BM25，使用RRF按排名融合并保留
+每一路的原始排名与分数；单路故障时明确标记降级。权限范围由服务端身份生成，Chat请求体不能
+自报`allowed_scopes`。
+
+BM25默认使用Jieba搜索模式和项目内的哔哩哔哩业务词典；`bigram`继续作为确定性对照基线。
+固定集显示Jieba在Hybrid中把Recall@1从75%提升到87.5%、MRR@5从85.42%提升到91.67%。
+分词器变化也会改变RRF分数，因此默认回答门禁已经发布`membership-query-v2`并重新校准阈值。
+
+领域词典管理接口位于`/api/v1/knowledge/dictionary`：候选词必须经过审核，发布时生成带SHA-256的
+不可变Jieba快照；新版本激活后旧版本保留为`superseded`，可下载回放。外部客服日志和工单当前只
+提供`conversation_log_mock`与`ticket_mock`候选入口，不能绕过人工审核。
+
+主要接口：
+
+```text
+POST /terms                         创建candidate
+POST /candidates/mock               导入Mock候选
+GET  /terms                         按业务域/状态筛选
+POST /terms/{term_id}/review        approve或reject
+POST /versions/publish              发布所有approved词
+GET  /versions                      查看发布历史
+GET  /versions/active/artifact      下载当前Jieba制品
+GET  /versions/{version_id}/artifact 下载历史制品
+```
+
+Tokenizer不在用户请求中实时查询管理库。部署流水线下载已发布制品，校验`content_sha256`，写入
+`BILI_SUPPORT_BM25_USER_DICTIONARY_PATH`指向的文件并重启实例；这样线上分词结果能关联明确版本，
+也能通过部署旧制品完成回滚。当前项目复用知识管理Token，真正生产环境还需在网关增加运营角色RBAC。
+
+7C已支持在Small-to-Big恢复Parent后一次性批量Rerank。`mock`只用于验证排序、Trace和降级结构，
+固定集出现质量回退，因此正式Chat默认保持关闭。接入真实OpenAI-compatible模型时可设置
+`BILI_SUPPORT_RERANK_PROVIDER=llm`，完成真实固定集评估后再决定是否开启
+`BILI_SUPPORT_CUSTOMER_RERANK_ENABLED=true`。Reranker超时、无效响应或Provider故障时原样回退
+RRF Parent顺序，不生成虚假的Rerank分数。
 
 也可以使用同一条调试命令：
 
@@ -736,3 +840,9 @@ python -m uvicorn bili_support.main:app --reload --port 8011
 
 第四周意图契约、Zero-shot、Few-shot 与混合分类任务见
 [第四周学习与任务记录](doc/week4-learning-record.md)。
+
+第五周文档解析、结构化Chunk与评估见[第五周学习与任务记录](doc/week5-learning-record.md)。
+
+第六周Embedding、Milvus与Small-to-Big检索见[第六周学习与任务记录](doc/week6-learning-record.md)。
+
+第七周BM25、RRF、Rerank与回答门禁见[第七周学习与任务记录](doc/week7-learning-record.md)。

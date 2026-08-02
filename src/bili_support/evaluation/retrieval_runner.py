@@ -15,7 +15,9 @@ from bili_support.evaluation.retrieval_types import (
     RetrievalFailureKind,
     RetrievedParent,
 )
+from bili_support.knowledge.reranking import RerankErrorCode
 from bili_support.knowledge.retrieval import RetrievalMode
+from bili_support.knowledge.tokenizers import BM25TokenizerKind
 from bili_support.schemas.knowledge import KnowledgeRetrievalRequest
 from bili_support.services.retrieval import KnowledgeRetrievalService
 
@@ -32,11 +34,21 @@ class RetrievalEvaluator:
         actor: UserContext,
         embedding_model: str,
         retrieval_mode: RetrievalMode = RetrievalMode.VECTOR,
+        rerank_enabled: bool = False,
+        rerank_provider: str | None = None,
+        rerank_model: str | None = None,
+        rerank_candidate_k: int = 10,
+        bm25_tokenizer: BM25TokenizerKind | None = None,
     ) -> None:
         self._service = service
         self._actor = actor
         self._embedding_model = embedding_model
         self._retrieval_mode = retrieval_mode
+        self._rerank_enabled = rerank_enabled
+        self._rerank_provider = rerank_provider
+        self._rerank_model = rerank_model
+        self._rerank_candidate_k = rerank_candidate_k
+        self._bm25_tokenizer = bm25_tokenizer
 
     async def evaluate(
         self,
@@ -51,11 +63,19 @@ class RetrievalEvaluator:
             dataset=dataset_name,
             case_count=len(cases),
             retrieval_mode=self._retrieval_mode,
-            embedding_model=(
-                self._embedding_model
-                if self._retrieval_mode is RetrievalMode.VECTOR
+            bm25_tokenizer=(
+                self._bm25_tokenizer
+                if self._retrieval_mode in {RetrievalMode.BM25, RetrievalMode.HYBRID}
                 else None
             ),
+            embedding_model=(
+                self._embedding_model
+                if self._retrieval_mode is not RetrievalMode.BM25
+                else None
+            ),
+            rerank_enabled=self._rerank_enabled,
+            rerank_provider=self._rerank_provider if self._rerank_enabled else None,
+            rerank_model=self._rerank_model if self._rerank_enabled else None,
             metrics=_aggregate_metrics(results),
             cases=results,
         )
@@ -75,6 +95,8 @@ class RetrievalEvaluator:
                     retrieval_mode=self._retrieval_mode,
                     child_top_k=20,
                     parent_top_k=_EVALUATION_TOP_K,
+                    rerank_enabled=self._rerank_enabled,
+                    rerank_candidate_k=self._rerank_candidate_k,
                 ),
             )
             latency_ms = (perf_counter() - started) * 1000
@@ -83,12 +105,23 @@ class RetrievalEvaluator:
                     parent_chunk_id=item.parent.id,
                     document_title=item.document_title,
                     content=item.parent.content,
-                    score=item.best_child_score,
+                    score=(
+                        item.rerank_score
+                        if item.rerank_score is not None
+                        else item.best_child_score
+                    ),
                     rank=rank,
                 )
                 for rank, item in enumerate(response.parents, start=1)
             )
-            return _score_case(case=case, parents=parents, latency_ms=latency_ms)
+            return _score_case(
+                case=case,
+                parents=parents,
+                latency_ms=latency_ms,
+                rerank_applied=response.reranking.applied,
+                rerank_degraded=response.reranking.degraded,
+                rerank_error_code=response.reranking.error_code,
+            )
         except Exception as exc:
             # 单个Provider/数据库故障保留为失败样本，不能让整份报告消失。
             return RetrievalCaseResult(
@@ -110,6 +143,9 @@ def _score_case(
     case: RetrievalEvaluationCase,
     parents: tuple[RetrievedParent, ...],
     latency_ms: float,
+    rerank_applied: bool = False,
+    rerank_degraded: bool = False,
+    rerank_error_code: RerankErrorCode | None = None,
 ) -> RetrievalCaseResult:
     """正例计算宏平均Recall，负例检查Top-5必须为空。"""
 
@@ -127,6 +163,9 @@ def _score_case(
             reciprocal_rank=0.0,
             latency_ms=latency_ms,
             failures=failures,
+            rerank_applied=rerank_applied,
+            rerank_degraded=rerank_degraded,
+            rerank_error_code=rerank_error_code,
         )
 
     ranks = {
@@ -159,6 +198,9 @@ def _score_case(
         reciprocal_rank=0.0 if first_rank is None else 1.0 / first_rank,
         latency_ms=latency_ms,
         failures=failures,
+        rerank_applied=rerank_applied,
+        rerank_degraded=rerank_degraded,
+        rerank_error_code=rerank_error_code,
     )
 
 
@@ -210,6 +252,9 @@ def _aggregate_metrics(
                 for item in results
             )
             / len(results)
+        ),
+        rerank_degradation_rate=_mean(
+            tuple(1.0 if item.rerank_degraded else 0.0 for item in results)
         ),
         latency_p50_ms=_percentile(successful_latencies, 0.50),
         latency_p95_ms=_percentile(successful_latencies, 0.95),

@@ -18,6 +18,7 @@ from bili_support.evaluation.retrieval_report import (
 )
 from bili_support.evaluation.retrieval_runner import RetrievalEvaluator
 from bili_support.knowledge.retrieval import RetrievalMode
+from bili_support.knowledge.tokenizers import BM25TokenizerKind
 from bili_support.main import create_app
 from bili_support.services.retrieval import KnowledgeRetrievalService
 
@@ -43,6 +44,23 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data/evaluation/retrieval_report_v1"),
     )
+    parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="对Small-to-Big Parent候选执行配置的批量Reranker",
+    )
+    parser.add_argument(
+        "--rerank-candidate-k",
+        type=int,
+        default=10,
+        choices=range(5, 21),
+    )
+    parser.add_argument(
+        "--bm25-tokenizer",
+        choices=[kind.value for kind in BM25TokenizerKind],
+        default=None,
+        help="覆盖当前配置，用于bigram/jieba固定集对照",
+    )
     return parser
 
 
@@ -52,6 +70,12 @@ async def run_cli(arguments: argparse.Namespace) -> int:
     try:
         cases = load_retrieval_evaluation_cases(arguments.dataset)
         settings = get_settings()
+        if arguments.bm25_tokenizer is not None:
+            settings = settings.model_copy(
+                update={
+                    "bm25_tokenizer": BM25TokenizerKind(arguments.bm25_tokenizer)
+                }
+            )
         application = create_app(settings)
         actor = UserContext(
             external_id=arguments.user_id,
@@ -67,6 +91,11 @@ async def run_cli(arguments: argparse.Namespace) -> int:
                 actor=actor,
                 embedding_model=settings.embedding_model,
                 retrieval_mode=RetrievalMode(arguments.mode),
+                rerank_enabled=arguments.rerank,
+                rerank_provider=settings.rerank_provider.value,
+                rerank_model=settings.rerank_model,
+                rerank_candidate_k=arguments.rerank_candidate_k,
+                bm25_tokenizer=settings.bm25_tokenizer,
             ).evaluate(
                 dataset_name=arguments.dataset.name,
                 cases=cases,

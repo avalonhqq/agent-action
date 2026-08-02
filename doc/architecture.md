@@ -151,14 +151,25 @@ flowchart LR
 
 Request ID 使用安全字符和长度约束；访问日志不记录 query value 和请求体。核心 `AppError` 不依赖 FastAPI，Web 边界负责转换 HTTP 状态与错误响应。
 
-## 7. LLM 调用子流程
+## 7. Chat、知识检索与 LLM 调用子流程
 
 ```mermaid
 flowchart LR
-    CHAT["Chat API / SSE"] --> SERVICE["ChatService"]
-    SERVICE --> REWRITE["Standalone Query Rewrite"]
-    REWRITE --> PROMPT["Versioned Prompt"]
-    PROMPT --> WINDOW["Bounded Context"]
+    CHAT["Chat API / SSE"] --> ROUTER["CustomerServiceRouter"]
+    ROUTER -->|"普通闲聊"| SERVICE["ChatService"]
+    ROUTER -->|"低风险业务问题"| RETRIEVAL["KnowledgeRetrievalService"]
+    ROUTER -->|"高风险 / 不明确"| HUMAN["Human Review Mock"]
+    RETRIEVAL --> VECTOR["Milvus Vector Search"]
+    RETRIEVAL --> BM25["BM25 Search"]
+    VECTOR --> PARENT["Parent Expansion + Dedup"]
+    BM25 --> PARENT
+    PARENT --> EVIDENCE["Bounded Evidence + Citation IDs"]
+    EVIDENCE --> SERVICE
+    SERVICE --> PROMPT["Versioned Prompt"]
+    PROMPT -->|"有知识证据"| GROUNDED["grounded_support:v1"]
+    PROMPT -->|"普通闲聊"| GENERAL["support_answer:v1"]
+    GROUNDED --> WINDOW["Bounded Context"]
+    GENERAL --> WINDOW
     WINDOW --> CONTRACT["LLMProvider"]
     CONTRACT --> MOCK["Deterministic Mock"]
     CONTRACT --> COMPAT["OpenAI-compatible Adapter"]
@@ -167,7 +178,7 @@ flowchart LR
     RESULT --> USAGE["Safe Usage Record"]
 ```
 
-SSE 客户端断开时关闭上游异步生成器；取消不被转成普通错误。模型响应在 Provider 边界重新校验，业务层不接触 HTTP 或第三方 SDK 类型。结构化输出同时使用 JSON Schema 生成约束和 Pydantic 接收校验。
+业务知识请求由服务端根据意图中的业务域和当前用户身份生成检索条件，客户端不能自行声明管理员权限。检索到 Parent 证据后，系统使用带证据编号的 `grounded_support:v1`；没有证据或检索失败时返回确定性边界答复，不让模型脱离知识库自由回答。SSE 客户端断开时关闭上游异步生成器；取消不被转成普通错误。模型响应在 Provider 边界重新校验，业务层不接触 HTTP 或第三方 SDK 类型。结构化输出同时使用 JSON Schema 生成约束和 Pydantic 接收校验。
 
 ## 8. 会话持久化与事务边界
 

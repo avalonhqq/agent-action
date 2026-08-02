@@ -4,10 +4,12 @@ from fastapi import APIRouter
 
 from bili_support.api.chat import create_chat_router
 from bili_support.api.conversations import create_conversation_router
+from bili_support.api.dictionary import create_dictionary_router
 from bili_support.api.knowledge import create_knowledge_router
 from bili_support.core.security import AuthDependency
 from bili_support.llm.service import ChatService
 from bili_support.services.conversations import ConversationService
+from bili_support.services.dictionary import KnowledgeDictionaryService
 from bili_support.services.indexing import KnowledgeIndexingService
 from bili_support.services.knowledge import KnowledgeIngestionService
 from bili_support.services.retrieval import KnowledgeRetrievalService
@@ -19,11 +21,13 @@ def create_api_router(
     knowledge_service: KnowledgeIngestionService,
     knowledge_indexing_service: KnowledgeIndexingService,
     knowledge_retrieval_service: KnowledgeRetrievalService,
+    dictionary_service: KnowledgeDictionaryService,
     authenticate: AuthDependency,
 ) -> APIRouter:
     router = APIRouter()
     router.include_router(create_chat_router(chat_service))
     router.include_router(create_conversation_router(conversation_service, authenticate))
+    router.include_router(create_dictionary_router(dictionary_service, authenticate))
     router.include_router(
         create_knowledge_router(
             knowledge_service,

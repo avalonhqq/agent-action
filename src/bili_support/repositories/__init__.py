@@ -6,6 +6,7 @@ from bili_support.repositories.conversations import (
     ModelCallRepository,
     UserRepository,
 )
+from bili_support.repositories.dictionary import KnowledgeDictionaryRepository
 from bili_support.repositories.knowledge import KnowledgeRepository
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "MessageRepository",
     "ModelCallRepository",
     "KnowledgeRepository",
+    "KnowledgeDictionaryRepository",
     "UserRepository",
 ]

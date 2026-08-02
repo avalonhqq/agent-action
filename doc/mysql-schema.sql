@@ -211,3 +211,63 @@ CREATE TABLE IF NOT EXISTS `knowledge_chunks` (
   CONSTRAINT `ck_chunks_ordinal` CHECK (`ordinal` >= 0),
   CONSTRAINT `ck_chunks_char_count` CHECK (`char_count` > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `knowledge_dictionary_terms` (
+  `id` varchar(36) NOT NULL,
+  `term` varchar(100) NOT NULL,
+  `normalized_term` varchar(100) NOT NULL,
+  `aliases` json NOT NULL,
+  `business_domain` varchar(32) NOT NULL,
+  `term_type` varchar(32) NOT NULL,
+  `frequency` int NOT NULL,
+  `source_type` varchar(32) NOT NULL,
+  `source_reference` varchar(255) DEFAULT NULL,
+  `status` varchar(16) NOT NULL,
+  `review_note` varchar(500) DEFAULT NULL,
+  `created_by_user_id` varchar(36) NOT NULL,
+  `reviewed_by_user_id` varchar(36) DEFAULT NULL,
+  `reviewed_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_dictionary_terms_domain_normalized`
+    (`business_domain`, `normalized_term`),
+  KEY `ix_dictionary_terms_domain_status` (`business_domain`, `status`),
+  KEY `ix_dictionary_terms_created_by_user_id` (`created_by_user_id`),
+  KEY `ix_dictionary_terms_reviewed_by_user_id` (`reviewed_by_user_id`),
+  CONSTRAINT `fk_dictionary_terms_created_user`
+    FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `fk_dictionary_terms_reviewed_user`
+    FOREIGN KEY (`reviewed_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `ck_dictionary_terms_status`
+    CHECK (`status` IN ('candidate', 'approved', 'rejected')),
+  CONSTRAINT `ck_dictionary_terms_type`
+    CHECK (`term_type` IN ('product', 'feature', 'issue', 'action', 'error_code', 'other')),
+  CONSTRAINT `ck_dictionary_terms_source`
+    CHECK (`source_type` IN ('manual', 'knowledge_keyword', 'product_catalog',
+      'conversation_log_mock', 'ticket_mock')),
+  CONSTRAINT `ck_dictionary_terms_frequency` CHECK (`frequency` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `knowledge_dictionary_versions` (
+  `id` varchar(36) NOT NULL,
+  `version_number` int NOT NULL,
+  `status` varchar(16) NOT NULL,
+  `content_sha256` varchar(64) NOT NULL,
+  `artifact_content` longtext NOT NULL,
+  `term_count` int NOT NULL,
+  `published_by_user_id` varchar(36) NOT NULL,
+  `release_note` varchar(500) DEFAULT NULL,
+  `published_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_dictionary_versions_number` (`version_number`),
+  UNIQUE KEY `uq_dictionary_versions_sha256` (`content_sha256`),
+  KEY `ix_dictionary_versions_status_published` (`status`, `published_at`),
+  KEY `ix_dictionary_versions_published_by_user_id` (`published_by_user_id`),
+  CONSTRAINT `fk_dictionary_versions_published_user`
+    FOREIGN KEY (`published_by_user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `ck_dictionary_versions_status`
+    CHECK (`status` IN ('active', 'superseded')),
+  CONSTRAINT `ck_dictionary_versions_number` CHECK (`version_number` > 0),
+  CONSTRAINT `ck_dictionary_versions_term_count` CHECK (`term_count` > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

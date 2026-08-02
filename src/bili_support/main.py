@@ -34,7 +34,14 @@ from bili_support.knowledge.embedding import (
     EmbeddingProvider,
 )
 from bili_support.knowledge.loaders import create_default_loader_registry
+from bili_support.knowledge.rerank_factory import build_rerank_provider
+from bili_support.knowledge.reranking import RerankProvider
 from bili_support.knowledge.storage import LocalKnowledgeFileStore
+from bili_support.knowledge.tokenizers import (
+    BM25TokenizerKind,
+    SearchTokenizer,
+    create_search_tokenizer,
+)
 from bili_support.knowledge.vector_store import (
     MilvusVectorStore,
     VectorStore,
@@ -49,8 +56,10 @@ from bili_support.llm.usage import InMemoryUsageRecorder, UsageRecorder
 from bili_support.routing import CustomerServiceRouter
 from bili_support.schemas.system import HealthResponse, ReadinessResponse
 from bili_support.services.conversations import ConversationService
+from bili_support.services.dictionary import KnowledgeDictionaryService
 from bili_support.services.indexing import KnowledgeIndexingService
 from bili_support.services.knowledge import KnowledgeIngestionService
+from bili_support.services.policy_retrieval import PolicyAwareKnowledgeRetriever
 from bili_support.services.retrieval import KnowledgeRetrievalService
 from bili_support.ui import register_support_ui
 
@@ -65,6 +74,8 @@ def create_app(
         history_cache: ConversationHistoryCache | None = None,
         embedding_provider: EmbeddingProvider | None = None,
         vector_store: VectorStore | None = None,
+        rerank_provider: RerankProvider | None = None,
+        bm25_tokenizer: SearchTokenizer | None = None,
 ) -> FastAPI:
     """使用显式注入或缓存配置创建完整 FastAPI 应用。"""
     current_settings = settings or get_settings()
@@ -77,6 +88,14 @@ def create_app(
     )
     # 同一 Registry 保证回答与意图 Prompt 的版本解析方式一致。
     prompt_registry = create_default_prompt_registry()
+    current_rerank_provider = (
+        rerank_provider
+        or build_rerank_provider(
+            settings=current_settings,
+            llm_provider=provider,
+            prompt_registry=prompt_registry,
+        )
+    )
     recorder = usage_recorder or InMemoryUsageRecorder()
     current_database = database or Database(
         current_settings.database_url,
@@ -120,14 +139,6 @@ def create_app(
         model_classifier=model_intent_classifier,
         policy=HybridIntentPolicy(),
     )
-    # 正式消息先经过意图路由；第五周知识库尚未接入，知识与人工下游明确标为 Mock。
-    customer_service_router = CustomerServiceRouter(intent_classifier)
-    conversation_service = ConversationService(
-        current_database,
-        chat_service,
-        router=customer_service_router,
-        history_cache=current_history_cache,
-    )
     knowledge_service = KnowledgeIngestionService(
         database=current_database,
         # Loader 注册表封装文件类型差异，Service 始终只处理统一 LoadedDocument。
@@ -139,6 +150,7 @@ def create_app(
         ),
         max_file_bytes=current_settings.knowledge_max_file_bytes,
     )
+    dictionary_service = KnowledgeDictionaryService(current_database)
     # 6B默认使用确定性Hash Mock验证索引管线；真实Embedding Provider在后续模型实验接入。
     current_embedding_provider = embedding_provider or (
         DeterministicHashEmbeddingProvider(
@@ -187,6 +199,40 @@ def create_app(
         embedding_timeout_seconds=current_settings.embedding_timeout_seconds,
         collection_name=current_settings.milvus_collection,
         rewriter=StandaloneQueryRewriter(),
+        bm25_tokenizer=(
+            bm25_tokenizer
+            or create_search_tokenizer(
+                kind=current_settings.bm25_tokenizer,
+                user_dictionary_path=(
+                    current_settings.bm25_user_dictionary_path
+                    if current_settings.bm25_tokenizer is BM25TokenizerKind.JIEBA
+                    else None
+                ),
+                jieba_hmm_enabled=current_settings.bm25_jieba_hmm_enabled,
+            )
+        ),
+        rerank_provider=current_rerank_provider,
+        rerank_model=current_settings.rerank_model,
+        rerank_timeout_seconds=current_settings.rerank_timeout_seconds,
+        rerank_max_concurrency=current_settings.rerank_max_concurrency,
+    )
+    # 7D策略编排复用同一个基础检索服务；会话与离线评估因此执行完全相同的门禁。
+    policy_retrieval_service = PolicyAwareKnowledgeRetriever(
+        knowledge_retrieval_service,
+        customer_rerank_enabled=current_settings.customer_rerank_enabled,
+    )
+    # 正式消息先完成意图路由；普通知识问题再进入真实检索和Grounded Prompt。
+    customer_service_router = CustomerServiceRouter(intent_classifier)
+    conversation_service = ConversationService(
+        current_database,
+        chat_service,
+        router=customer_service_router,
+        knowledge_retrieval_service=knowledge_retrieval_service,
+        policy_retrieval_service=policy_retrieval_service,
+        customer_retrieval_mode=current_settings.customer_retrieval_mode,
+        customer_rerank_enabled=current_settings.customer_rerank_enabled,
+        rerank_candidate_k=current_settings.rerank_candidate_k,
+        history_cache=current_history_cache,
     )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
 
@@ -226,6 +272,7 @@ def create_app(
             knowledge_service,
             knowledge_indexing_service,
             knowledge_retrieval_service,
+            dictionary_service,
             authenticate,
         )
     )
@@ -237,6 +284,8 @@ def create_app(
     application.state.knowledge_service = knowledge_service
     application.state.knowledge_indexing_service = knowledge_indexing_service
     application.state.knowledge_retrieval_service = knowledge_retrieval_service
+    application.state.dictionary_service = dictionary_service
+    application.state.policy_retrieval_service = policy_retrieval_service
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -290,6 +339,8 @@ if _settings.ui_enabled:
         app,
         service=app.state.conversation_service,
         intent_classifier=app.state.intent_classifier,
+        knowledge_service=app.state.knowledge_service,
+        dictionary_service=app.state.dictionary_service,
         expected_token=_settings.api_token.get_secret_value(),
         storage_secret=_settings.ui_storage_secret.get_secret_value(),
         prefill_demo_credentials=_settings.ui_prefill_demo_credentials,

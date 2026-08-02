@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from time import perf_counter
 
 from redis.exceptions import RedisError
@@ -13,6 +14,13 @@ from bili_support.core.cache import ConversationHistoryCache, NullConversationHi
 from bili_support.core.database import Database
 from bili_support.core.exceptions import AppError, ResourceNotFoundError
 from bili_support.core.security import UserContext
+from bili_support.intent.types import BusinessDomain
+from bili_support.knowledge.evidence import (
+    KnowledgeRetrievalTrace,
+    build_knowledge_evidence,
+)
+from bili_support.knowledge.retrieval import RetrievalMode
+from bili_support.knowledge.retrieval_policy import RetrievalDecisionKind
 from bili_support.llm.service import ChatService
 from bili_support.llm.types import (
     ChatMessage,
@@ -31,8 +39,23 @@ from bili_support.routing import (
     CustomerServiceRoutePlan,
     CustomerServiceRouter,
     CustomerServiceStreamChunk,
+    CustomerServiceTarget,
 )
 from bili_support.schemas.conversations import ConversationMessageResult
+from bili_support.services.policy_retrieval import (
+    PolicyAwareKnowledgeRetriever,
+    PolicyRetrievalResult,
+)
+from bili_support.services.retrieval import KnowledgeRetrievalService
+
+
+@dataclass(frozen=True, slots=True)
+class _KnowledgeExecution:
+    """一次路由完成后的知识执行准备；非知识路由保持三个默认值。"""
+
+    route_plan: CustomerServiceRoutePlan
+    evidence_context: str | None = None
+    response_override: str | None = None
 
 
 class ConversationService:
@@ -46,12 +69,27 @@ class ConversationService:
             self,
             database: Database,
             chat_service: ChatService,
-            router: CustomerServiceRouter,
+        router: CustomerServiceRouter,
+        knowledge_retrieval_service: KnowledgeRetrievalService,
+        policy_retrieval_service: PolicyAwareKnowledgeRetriever | None = None,
+            customer_retrieval_mode: RetrievalMode = RetrievalMode.VECTOR,
+            customer_rerank_enabled: bool = False,
+            rerank_candidate_k: int = 10,
             history_cache: ConversationHistoryCache | None = None,
     ) -> None:
+        if not 1 <= rerank_candidate_k <= 20:
+            raise ValueError("rerank_candidate_k must be between 1 and 20")
         self._database = database
         self._chat = chat_service
         self._router = router
+        self._customer_retrieval_mode = customer_retrieval_mode
+        self._policy_retrieval = (
+            policy_retrieval_service
+            or PolicyAwareKnowledgeRetriever(
+                knowledge_retrieval_service,
+                customer_rerank_enabled=customer_rerank_enabled,
+            )
+        )
         # 未提供缓存时使用空实现，避免到处判 None。
         self._history_cache = history_cache or NullConversationHistoryCache()
 
@@ -114,12 +152,30 @@ class ConversationService:
         route_plan: CustomerServiceRoutePlan | None = None
         try:
             route_plan = await self._router.route(content)
-            if route_plan.use_chat_model:
+            execution = await self._prepare_knowledge_execution(
+                actor=actor,
+                question=content,
+                history=history,
+                route_plan=route_plan,
+            )
+            route_plan = execution.route_plan
+            if execution.response_override is not None:
+                answer = execution.response_override
+                model = "deterministic-knowledge"
+                finish_reason = FinishReason.STOP
+                usage = TokenUsage(
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                )
+                prompt_version = "knowledge_retrieval:v1"
+            elif route_plan.use_chat_model:
                 # LLM 路径：调用 ChatService 生成回答。
                 result = await self._chat.complete(
                     request_id=request_id,
                     user_message=content,
                     history=history,
+                    evidence_context=execution.evidence_context,
                 )
                 answer = result.response.content
                 model = result.response.model
@@ -235,15 +291,42 @@ class ConversationService:
         prompt_version: str | None = None
         try:
             route_plan = await self._router.route(content)
+            execution = await self._prepare_knowledge_execution(
+                actor=actor,
+                question=content,
+                history=history,
+                route_plan=route_plan,
+            )
+            route_plan = execution.route_plan
             yield CustomerServiceStreamChunk(routing=route_plan.summary)
-            if route_plan.use_chat_model:
+            if execution.response_override is not None:
+                response = execution.response_override
+                model = "deterministic-knowledge"
+                prompt_version = "knowledge_retrieval:v1"
+                usage = TokenUsage(
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                )
+                answer_parts.append(response)
+                yield CustomerServiceStreamChunk(delta=response)
+                yield CustomerServiceStreamChunk(
+                    finish_reason=FinishReason.STOP,
+                    usage=usage,
+                )
+            elif route_plan.use_chat_model:
                 # LLM 流式路径。
                 model = self._chat.model
-                prompt_version = self._chat.prompt_version
+                prompt_version = (
+                    self._chat.grounded_prompt_version
+                    if execution.evidence_context is not None
+                    else self._chat.prompt_version
+                )
                 async for chunk in self._chat.stream(
                         request_id=request_id,
                         user_message=content,
                         history=history,
+                        evidence_context=execution.evidence_context,
                 ):
                     if chunk.delta:
                         answer_parts.append(chunk.delta)
@@ -297,6 +380,153 @@ class ConversationService:
                 model=model,
                 prompt_version=prompt_version,
             )
+
+    async def _prepare_knowledge_execution(
+        self,
+        *,
+        actor: UserContext,
+        question: str,
+        history: list[ChatMessage],
+        route_plan: CustomerServiceRoutePlan,
+    ) -> _KnowledgeExecution:
+        """知识路由先取可信Parent；无证据或依赖故障时禁止自由模型回答。"""
+
+        if route_plan.summary.target is not CustomerServiceTarget.KNOWLEDGE_RAG:
+            return _KnowledgeExecution(route_plan=route_plan)
+        domains = route_plan.summary.business_domains
+        if not domains:
+            return self._knowledge_fallback(
+                route_plan=route_plan,
+                domains=(),
+                error_code="missing_business_domain",
+                response=(
+                    "当前无法确定需要查询的知识领域，本次未生成无依据答案。"
+                    "请补充你要咨询的具体业务。"
+                ),
+            )
+
+        results = []
+        policy_results: list[PolicyRetrievalResult] = []
+        decision = route_plan.intent_decision
+        if decision is None:
+            return self._knowledge_fallback(
+                route_plan=route_plan,
+                domains=domains,
+                error_code="missing_intent_decision",
+                response="当前缺少可信意图信息，本次未生成无依据答案。",
+            )
+        try:
+            for domain in domains:
+                policy_result = await self._policy_retrieval.retrieve(
+                    actor=actor,
+                    question=question,
+                    domain=domain,
+                    actions=tuple(
+                        item.action
+                        for item in decision.intents
+                        if item.domain is domain
+                    ),
+                    entities=decision.entities,
+                    history=tuple(history[-20:]),
+                    mode=self._customer_retrieval_mode,
+                )
+                policy_results.append(policy_result)
+                results.append((domain, policy_result.view))
+        except AppError as exc:
+            return self._knowledge_fallback(
+                route_plan=route_plan,
+                domains=domains,
+                error_code=exc.code.value,
+                response=(
+                    "知识服务暂时不可用，本次没有根据不完整信息生成答案。"
+                    "请稍后重试。"
+                ),
+            )
+        except Exception:
+            return self._knowledge_fallback(
+                route_plan=route_plan,
+                domains=domains,
+                error_code="knowledge_retrieval_failed",
+                response=(
+                    "知识服务暂时不可用，本次没有根据不完整信息生成答案。"
+                    "请稍后重试。"
+                ),
+            )
+
+        bundle = build_knowledge_evidence(
+            results=results,
+            mode=self._customer_retrieval_mode,
+        )
+        selected_policy_result = max(
+            policy_results,
+            key=lambda item: {
+                RetrievalDecisionKind.ANSWER: 0,
+                RetrievalDecisionKind.CLARIFY: 1,
+                RetrievalDecisionKind.REFUSE: 2,
+            }[item.quality.kind],
+        )
+        trace = bundle.trace.model_copy(
+            update={
+                "policy": selected_policy_result.policy_trace,
+                "coverage": selected_policy_result.coverage,
+            }
+        )
+        updated_plan = route_plan.model_copy(
+            update={
+                "summary": route_plan.summary.model_copy(
+                    update={"retrieval": trace}
+                )
+            }
+        )
+        if selected_policy_result.quality.kind is RetrievalDecisionKind.REFUSE:
+            return _KnowledgeExecution(
+                route_plan=updated_plan,
+                response_override=(
+                    "当前知识库中没有找到足够依据，或现有依据相关性不足，"
+                    "暂时无法确认该问题。"
+                ),
+            )
+        if selected_policy_result.quality.kind is RetrievalDecisionKind.CLARIFY:
+            return _KnowledgeExecution(
+                route_plan=updated_plan,
+                response_override=(
+                    selected_policy_result.quality.clarification_question
+                    or "当前证据不完整，请补充更具体的信息。"
+                ),
+            )
+        return _KnowledgeExecution(
+            route_plan=updated_plan,
+            evidence_context=bundle.context_json,
+        )
+
+    def _knowledge_fallback(
+        self,
+        *,
+        route_plan: CustomerServiceRoutePlan,
+        domains: tuple[BusinessDomain, ...],
+        error_code: str,
+        response: str,
+    ) -> _KnowledgeExecution:
+        """把检索错误压缩成安全Trace，不泄露Provider异常或数据库细节。"""
+
+        trace = KnowledgeRetrievalTrace(
+            mode=self._customer_retrieval_mode,
+            business_domains=domains,
+            child_hit_count=0,
+            evidence_count=0,
+            error_code=error_code,
+        )
+        updated_plan = route_plan.model_copy(
+            update={
+                "summary": route_plan.summary.model_copy(
+                    update={"retrieval": trace}
+                )
+            }
+        )
+        return _KnowledgeExecution(
+            route_plan=updated_plan,
+            response_override=response,
+        )
 
     async def _save_user_message(
             self,

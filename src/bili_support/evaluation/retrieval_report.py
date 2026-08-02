@@ -17,7 +17,11 @@ def render_retrieval_evaluation_markdown(
         f"- 数据集：`{report.dataset}`",
         f"- 样本数：{report.case_count}",
         f"- 检索通道：`{report.retrieval_mode.value}`",
+        f"- BM25分词器：`{report.bm25_tokenizer.value if report.bm25_tokenizer else '不适用'}`",
         f"- Embedding 模型：`{report.embedding_model or '不适用'}`",
+        f"- Rerank：`{'开启' if report.rerank_enabled else '关闭'}`",
+        f"- Rerank Provider：`{report.rerank_provider or '不适用'}`",
+        f"- Rerank 模型：`{report.rerank_model or '不适用'}`",
         (
             f"- 正例/负例：{metrics.positive_case_count}/"
             f"{metrics.negative_case_count}"
@@ -25,8 +29,11 @@ def render_retrieval_evaluation_markdown(
         "",
         "## 核心指标",
         "",
-        "| Recall@1 | Recall@3 | Recall@5 | MRR@5 | 负例准确率 | 执行失败率 | P50 | P95 |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        (
+            "| Recall@1 | Recall@3 | Recall@5 | MRR@5 | 负例准确率 "
+            "| 执行失败率 | Rerank降级率 | P50 | P95 |"
+        ),
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         (
             f"| {_percent(metrics.recall_at_1)} "
             f"| {_percent(metrics.recall_at_3)} "
@@ -34,6 +41,7 @@ def render_retrieval_evaluation_markdown(
             f"| {_percent(metrics.mrr_at_5)} "
             f"| {_percent(metrics.negative_accuracy)} "
             f"| {_percent(metrics.execution_failure_rate)} "
+            f"| {_percent(metrics.rerank_degradation_rate)} "
             f"| {metrics.latency_p50_ms:.2f} ms "
             f"| {metrics.latency_p95_ms:.2f} ms |"
         ),

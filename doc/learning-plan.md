@@ -51,7 +51,7 @@ Codex 自动补齐工程前置
 | 4   | 意图识别与结构化决策             | 多标签意图、实体、风险、置信度、Few-shot、评估                         | 数据集读写、评估 CLI/API、报告页面              | 下一阶段 |
 | 5   | RAG 知识表示与 Chunk        | 结构恢复、Small-to-Big、表格语义、元数据                          | PDF/DOCX/MD/TXT Loader、任务表、上传和重试接口 | 未开始  |
 | 6   | Embedding 与向量检索        | 向量语义、相似度、Top-K、Query Rewrite、过滤                     | Milvus Collection、索引版本、调试接口          | 进行中  |
-| 7   | 混合检索、Rerank 与策略        | BM25、RRF、Reranker、RetrievalPolicy、多实体覆盖             | FAQ CRUD、领域词典管理、评估报表               | 未开始  |
+| 7   | 混合检索、Rerank 与策略        | BM25、RRF、Reranker、RetrievalPolicy、多实体覆盖             | FAQ CRUD、领域词典管理、评估报表               | 已完成  |
 | 8   | 证据约束生成与 RAG 评估         | Grounded Prompt、引用、拒答、Faithfulness、Answer Relevancy | 引用接口、Golden Dataset 管理、批量运行器       | 未开始  |
 | 9   | LangGraph 状态化工作流       | State、Node、Edge、Checkpoint、循环保护和恢复                  | Checkpoint 存储、流程调试页和持久化接线          | 未开始  |
 | 10  | 多 Agent 与 Tool Calling | Supervisor、任务拆解、并发聚合、工具选择和确认                        | Mock 业务服务、权限表、审计表和管理接口             | 未开始  |

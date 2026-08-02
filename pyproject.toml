@@ -15,6 +15,7 @@ dependencies = [
   "cryptography>=45,<47",
   "fastapi>=0.121,<1.0",
   "httpx>=0.28,<1.0",
+  "jieba>=0.42.1,<1.0",
   "nicegui>=3.7,<4.0",
   "pydantic>=2.12,<3.0",
   "pydantic-settings>=2.12,<3.0",
@@ -42,6 +43,7 @@ bili-intent = "bili_support.intent.cli:main"
 bili-intent-eval = "bili_support.evaluation.intent_cli:main"
 bili-chunk-eval = "bili_support.evaluation.chunk_cli:main"
 bili-retrieval-eval = "bili_support.evaluation.retrieval_cli:main"
+bili-policy-eval = "bili_support.evaluation.policy_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bili_support"]

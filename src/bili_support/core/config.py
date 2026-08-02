@@ -8,6 +8,10 @@ from functools import lru_cache
 from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
+from bili_support.knowledge.reranking import RerankProviderKind
+from bili_support.knowledge.retrieval import RetrievalMode
+from bili_support.knowledge.tokenizers import BM25TokenizerKind
+
 
 class Environment(StrEnum):
     LOCAL = "local"
@@ -124,6 +128,20 @@ class Settings(BaseSettings):
     milvus_index_m: int = Field(default=16, ge=2, le=2048)
     milvus_index_ef_construction: int = Field(default=200, ge=8, le=4096)
     milvus_search_ef: int = Field(default=64, ge=1, le=4096)
+    # 7A-2默认使用Jieba搜索模式；bigram保留为可重放的对照基线。
+    bm25_tokenizer: BM25TokenizerKind = BM25TokenizerKind.JIEBA
+    bm25_jieba_hmm_enabled: bool = False
+    bm25_user_dictionary_path: str = "./data/dictionaries/bilibili_support.txt"
+    # 7B固定集确认RRF无质量回退后，正式客服RAG默认使用Hybrid双路召回。
+    customer_retrieval_mode: RetrievalMode = RetrievalMode.HYBRID
+    # Rerank默认只提供可显式开启的Mock管线；真实LLM评估后再决定正式开启。
+    rerank_provider: RerankProviderKind = RerankProviderKind.MOCK
+    rerank_model: str = "mock-reranker-v1"
+    rerank_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    rerank_max_concurrency: int = Field(default=4, ge=1, le=64)
+    rerank_candidate_k: int = Field(default=10, ge=1, le=20)
+    rerank_parse_retries: int = Field(default=1, ge=0, le=2)
+    customer_rerank_enabled: bool = False
     api_token: SecretStr = SecretStr("local-demo-token")
     ui_enabled: bool = True
     ui_prefill_demo_credentials: bool = False
@@ -153,6 +171,8 @@ class Settings(BaseSettings):
         "knowledge_index_chunk_schema_version",
         "milvus_uri",
         "milvus_collection",
+        "bm25_user_dictionary_path",
+        "rerank_model",
     )
     @classmethod
     def llm_text_settings_must_not_be_blank(cls, value: str) -> str:
@@ -174,6 +194,13 @@ class Settings(BaseSettings):
             raise ValueError("milvus_required needs milvus_enabled=True")
         if self.milvus_search_ef < self.milvus_index_m:
             raise ValueError("milvus_search_ef must be at least milvus_index_m")
+        if (
+            self.customer_rerank_enabled
+            and self.rerank_provider is RerankProviderKind.DISABLED
+        ):
+            raise ValueError("customer_rerank_enabled needs a rerank provider")
+        if self.customer_rerank_enabled and self.rerank_candidate_k < 5:
+            raise ValueError("customer rerank candidate budget must be at least 5")
         if self.environment == Environment.PRODUCTION and (
             self.api_token.get_secret_value() == "local-demo-token"
             or self.ui_storage_secret.get_secret_value()

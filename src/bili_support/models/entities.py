@@ -201,6 +201,92 @@ class KnowledgeIngestionJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class KnowledgeDictionaryTerm(TimestampMixin, Base):
+    """可审核领域词；候选和拒绝词不会进入Jieba发布制品。"""
+
+    __tablename__ = "knowledge_dictionary_terms"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_domain",
+            "normalized_term",
+            name="uq_dictionary_terms_domain_normalized",
+        ),
+        CheckConstraint(
+            "status IN ('candidate', 'approved', 'rejected')",
+            name="status_allowed",
+        ),
+        CheckConstraint(
+            "term_type IN ('product', 'feature', 'issue', 'action', "
+            "'error_code', 'other')",
+            name="term_type_allowed",
+        ),
+        CheckConstraint(
+            "source_type IN ('manual', 'knowledge_keyword', 'product_catalog', "
+            "'conversation_log_mock', 'ticket_mock')",
+            name="source_type_allowed",
+        ),
+        CheckConstraint("frequency > 0", name="frequency_positive"),
+        Index(
+            "ix_dictionary_terms_domain_status",
+            "business_domain",
+            "status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    term: Mapped[str] = mapped_column(String(100))
+    normalized_term: Mapped[str] = mapped_column(String(100))
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    business_domain: Mapped[str] = mapped_column(String(32), index=True)
+    term_type: Mapped[str] = mapped_column(String(32))
+    frequency: Mapped[int] = mapped_column(Integer)
+    source_type: Mapped[str] = mapped_column(String(32))
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(16), default="candidate")
+    review_note: Mapped[str | None] = mapped_column(String(500))
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KnowledgeDictionaryVersion(Base):
+    """一次发布的不可变完整词典快照，可按版本下载、回放和回滚。"""
+
+    __tablename__ = "knowledge_dictionary_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'superseded')",
+            name="status_allowed",
+        ),
+        CheckConstraint("version_number > 0", name="version_positive"),
+        CheckConstraint("term_count > 0", name="term_count_positive"),
+        Index("ix_dictionary_versions_status_published", "status", "published_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    version_number: Mapped[int] = mapped_column(Integer, unique=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    content_sha256: Mapped[str] = mapped_column(String(64), unique=True)
+    artifact_content: Mapped[str] = mapped_column(Text)
+    term_count: Mapped[int] = mapped_column(Integer)
+    published_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    release_note: Mapped[str | None] = mapped_column(String(500))
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+
+
 class KnowledgeSourceBlock(Base):
     """Loader忠实输出的结构块，不等同于最终检索Chunk。"""
 

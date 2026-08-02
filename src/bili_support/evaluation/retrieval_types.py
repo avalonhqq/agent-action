@@ -8,7 +8,9 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from bili_support.intent.types import BusinessDomain
+from bili_support.knowledge.reranking import RerankErrorCode
 from bili_support.knowledge.retrieval import RetrievalMode
+from bili_support.knowledge.tokenizers import BM25TokenizerKind
 
 
 class RelevantParent(BaseModel):
@@ -129,6 +131,9 @@ class RetrievalCaseResult(BaseModel):
     latency_ms: float = Field(ge=0.0)
     failures: tuple[RetrievalFailureKind, ...]
     error_code: str | None = None
+    rerank_applied: bool = False
+    rerank_degraded: bool = False
+    rerank_error_code: RerankErrorCode | None = None
 
     @property
     def passed(self) -> bool:
@@ -148,6 +153,7 @@ class RetrievalEvaluationMetrics(BaseModel):
     mrr_at_5: float = Field(ge=0.0, le=1.0)
     negative_accuracy: float = Field(ge=0.0, le=1.0)
     execution_failure_rate: float = Field(ge=0.0, le=1.0)
+    rerank_degradation_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     latency_p50_ms: float = Field(ge=0.0)
     latency_p95_ms: float = Field(ge=0.0)
     positive_case_count: int = Field(ge=0)
@@ -162,6 +168,10 @@ class RetrievalEvaluationReport(BaseModel):
     dataset: str
     case_count: int = Field(ge=1)
     retrieval_mode: RetrievalMode
+    bm25_tokenizer: BM25TokenizerKind | None = None
     embedding_model: str | None
+    rerank_enabled: bool = False
+    rerank_provider: str | None = None
+    rerank_model: str | None = None
     metrics: RetrievalEvaluationMetrics
     cases: tuple[RetrievalCaseResult, ...]

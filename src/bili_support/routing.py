@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from bili_support.core.exceptions import AppError
 from bili_support.intent.hybrid import HybridIntentClassifier
@@ -16,13 +16,14 @@ from bili_support.intent.types import (
     IntentRoute,
     RiskLevel,
 )
+from bili_support.knowledge.evidence import KnowledgeRetrievalTrace
 from bili_support.llm.types import FinishReason, TokenUsage
 
 
 class CustomerServiceTarget(StrEnum):
     """第四周可执行的客服下游；未实现模块必须在名称中明确 Mock。"""
 
-    KNOWLEDGE_MOCK = "knowledge_mock"          # 知识检索（Mock），正常业务走此路径
+    KNOWLEDGE_RAG = "knowledge_rag"            # 真实知识检索与证据约束回答
     GENERAL_CHAT = "general_chat"              # 闲聊对话，调用 LLM 自由回答
     CLARIFICATION = "clarification"            # 追问澄清，缺少关键信息时触发
     SAFETY = "safety"                          # 安全拦截，unsafe 路由命中
@@ -45,6 +46,8 @@ class CustomerServiceRouteSummary(BaseModel):
     rule_id: str | None = None                             # 规则命中时携带的规则编号
     applied_policy_ids: tuple[str, ...] = ()               # 后置策略触发的策略编号列表
     classification_error: str | None = None                # 分类失败时的错误码
+    business_domains: tuple[BusinessDomain, ...] = ()       # 知识检索使用的业务域
+    retrieval: KnowledgeRetrievalTrace | None = None        # 真实RAG检索摘要
 
 
 class CustomerServiceRoutePlan(BaseModel):
@@ -59,6 +62,8 @@ class CustomerServiceRoutePlan(BaseModel):
     summary: CustomerServiceRouteSummary           # 审计路由摘要
     use_chat_model: bool                           # 是否调用 LLM 生成回答
     response_override: str | None = None           # 确定性回复文本，非空时跳过 LLM
+    # 仅供服务器内部策略选择；exclude防止订单号、账号号等实体进入公开响应。
+    intent_decision: IntentDecision | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def validate_execution_mode(self) -> CustomerServiceRoutePlan:
@@ -97,7 +102,7 @@ class CustomerServiceRouter:
         5. 高风险/严重风险 → HUMAN_REVIEW_MOCK（人工复核）
         6. 需要澄清 → CLARIFICATION（追问）
         7. 请求转人工 → HUMAN_SERVICE_MOCK（转人工）
-        8. 其他 → KNOWLEDGE_MOCK（知识检索，正常业务路径）
+        8. 其他 → KNOWLEDGE_RAG（真实知识检索，正常业务路径）
         """
         try:
             result = await self._classifier.classify(question)
@@ -145,6 +150,7 @@ class CustomerServiceRouter:
                     applied_policy_ids=result.applied_policy_ids,
                 ),
                 use_chat_model=True,
+                intent_decision=decision,
             )
 
         # 以下均为 supported 路由。
@@ -180,17 +186,17 @@ class CustomerServiceRouter:
                 applied_policy_ids=result.applied_policy_ids,
             )
 
-        # 7. 正常业务路径 → 知识检索 Mock + LLM 回答。
-        # 第五至八周接入真实 RAG；第四周只验证 Intent 能驱动知识下游。
+        # 7. 正常业务路径 → 真实知识检索 + 证据约束LLM回答。
         return CustomerServiceRoutePlan(
             summary=self._summary(
-                target=CustomerServiceTarget.KNOWLEDGE_MOCK,
-                mocked_downstream=True,
+                target=CustomerServiceTarget.KNOWLEDGE_RAG,
+                mocked_downstream=False,
                 decision=decision,
                 rule_id=result.rule_id,
                 applied_policy_ids=result.applied_policy_ids,
             ),
             use_chat_model=True,
+            intent_decision=decision,
         )
 
     @staticmethod
@@ -221,6 +227,7 @@ class CustomerServiceRouter:
             ),
             use_chat_model=False,
             response_override=response,
+            intent_decision=decision,
         )
 
     @staticmethod
@@ -258,6 +265,13 @@ class CustomerServiceRouter:
             source=decision.source,
             rule_id=rule_id,
             applied_policy_ids=applied_policy_ids,
+            business_domains=tuple(
+                dict.fromkeys(
+                    intent.domain
+                    for intent in decision.intents
+                    if intent.domain is not BusinessDomain.HUMAN_SERVICE
+                )
+            ),
         )
 
 

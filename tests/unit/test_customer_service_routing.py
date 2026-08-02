@@ -64,7 +64,7 @@ async def _route(decision: IntentDecision):
 
 
 @pytest.mark.asyncio
-async def test_supported_request_routes_to_knowledge_mock() -> None:
+async def test_supported_request_routes_to_real_knowledge_rag() -> None:
     plan = await _route(
         _decision(
             route=IntentRoute.SUPPORTED,
@@ -73,9 +73,13 @@ async def test_supported_request_routes_to_knowledge_mock() -> None:
         )
     )
 
-    assert plan.summary.target is CustomerServiceTarget.KNOWLEDGE_MOCK
-    assert plan.summary.mocked_downstream is True
+    assert plan.summary.target is CustomerServiceTarget.KNOWLEDGE_RAG
+    assert plan.summary.mocked_downstream is False
+    assert plan.summary.business_domains == (BusinessDomain.MEMBERSHIP,)
     assert plan.use_chat_model is True
+    assert plan.intent_decision is not None
+    # 完整意图只在服务器内部传给检索策略，公开序列化时不能泄露实体。
+    assert "intent_decision" not in plan.model_dump()
 
 
 @pytest.mark.asyncio
