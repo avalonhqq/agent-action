@@ -102,9 +102,7 @@ def register_support_ui(
                 ui.avatar("B", color="primary", text_color="white")
                 with ui.column().classes("gap-0"):
                     ui.label("BiliSupport AI").classes("text-h6 font-bold")
-                    ui.label("哔哩哔哩企业智能客服工作台").classes(
-                        "text-caption text-grey-7"
-                    )
+                    ui.label("哔哩哔哩企业智能客服工作台").classes("text-caption text-grey-7")
             with ui.row().classes("items-center gap-2"):
                 ui.badge("知识链路真实", color="positive")
                 ui.badge(
@@ -132,19 +130,13 @@ def register_support_ui(
                         password_toggle_button=True,
                     ).classes("w-72")
                     user_id = ui.input("用户 ID", value="demo-user").classes("w-52")
-                    display_name = ui.input("显示名称", value="演示用户").classes(
-                        "w-52"
-                    )
-                    thread = ui.input("当前 Thread ID").props("readonly").classes(
-                        "grow"
-                    )
-                ui.label(
-                    "本地使用统一Demo Token；生产环境需要企业SSO/JWT和运营RBAC。"
-                ).classes("text-caption text-grey-7 px-2 pb-2")
+                    display_name = ui.input("显示名称", value="演示用户").classes("w-52")
+                    thread = ui.input("当前 Thread ID").props("readonly").classes("grow")
+                ui.label("本地使用统一Demo Token；生产环境需要企业SSO/JWT和运营RBAC。").classes(
+                    "text-caption text-grey-7 px-2 pb-2"
+                )
 
-            with ui.tab_panels(tabs, value=overview_tab).classes(
-                "w-full bg-transparent"
-            ):
+            with ui.tab_panels(tabs, value=overview_tab).classes("w-full bg-transparent"):
                 with ui.tab_panel(overview_tab):
                     _render_overview(
                         tabs=tabs,
@@ -216,9 +208,7 @@ def register_support_ui(
                         ui.label("意图识别结果").classes("text-subtitle1 font-bold")
                         intent_result = ui.column().classes("w-full gap-2")
                         with intent_result:
-                            ui.label("输入问题后点击“仅识别意图”。").classes(
-                                "text-grey-6"
-                            )
+                            ui.label("输入问题后点击“仅识别意图”。").classes("text-grey-6")
 
                 with ui.tab_panel(knowledge_tab):
                     _section_heading(
@@ -240,23 +230,23 @@ def register_support_ui(
                                 value=DocumentKnowledgeType.MIXED.value,
                                 label="知识类型",
                             ).classes("w-full")
-                            access_scope = ui.input(
-                                "权限标签", value="public"
-                            ).classes("w-full")
-                            uploader = ui.upload(
-                                label="选择 PDF / DOCX / Markdown / TXT",
-                                auto_upload=True,
-                                max_file_size=knowledge_service.max_file_bytes,
-                            ).props("accept=.pdf,.docx,.md,.markdown,.txt").classes(
-                                "w-full"
+                            access_scope = ui.input("权限标签", value="public").classes("w-full")
+                            uploader = (
+                                ui.upload(
+                                    label="选择 PDF / DOCX / Markdown / TXT",
+                                    auto_upload=True,
+                                    max_file_size=knowledge_service.max_file_bytes,
+                                )
+                                .props("accept=.pdf,.docx,.md,.markdown,.txt")
+                                .classes("w-full")
                             )
                             upload_result = ui.column().classes("w-full")
                         with ui.card().classes("grow workbench-card"):
                             with ui.row().classes("w-full justify-between items-center"):
                                 ui.label("已入库知识").classes("text-h6 section-title")
-                                refresh_documents_button = ui.button(
-                                    "刷新", icon="refresh"
-                                ).props("flat")
+                                refresh_documents_button = ui.button("刷新", icon="refresh").props(
+                                    "flat"
+                                )
                             document_table = ui.table(
                                 columns=[
                                     {"name": "title", "label": "标题", "field": "title"},
@@ -277,9 +267,9 @@ def register_support_ui(
                     )
                     with ui.row().classes("w-full items-start gap-5"):
                         with ui.card().classes("w-full lg:w-[420px] workbench-card"):
-                            term_input = ui.input(
-                                "领域词", placeholder="例如：超级大会员"
-                            ).classes("w-full")
+                            term_input = ui.input("领域词", placeholder="例如：超级大会员").classes(
+                                "w-full"
+                            )
                             aliases_input = ui.input(
                                 "别名（逗号分隔）", placeholder="例如：超会, SVIP"
                             ).classes("w-full")
@@ -311,9 +301,9 @@ def register_support_ui(
                         with ui.card().classes("grow workbench-card"):
                             with ui.row().classes("w-full justify-between items-center"):
                                 ui.label("数据库词条").classes("text-h6 section-title")
-                                refresh_terms_button = ui.button(
-                                    "刷新", icon="refresh"
-                                ).props("flat")
+                                refresh_terms_button = ui.button("刷新", icon="refresh").props(
+                                    "flat"
+                                )
                             term_table = ui.table(
                                 columns=[
                                     {"name": "term", "label": "词条", "field": "term"},
@@ -333,12 +323,8 @@ def register_support_ui(
                         "审核人与发布动作会写入MySQL；Mock候选不能绕过审核。",
                     )
                     with ui.row().classes("w-full items-end gap-4"):
-                        review_note = ui.input(
-                            "审核意见", value="业务资料已确认"
-                        ).classes("grow")
-                        refresh_review_button = ui.button(
-                            "刷新候选", icon="refresh"
-                        )
+                        review_note = ui.input("审核意见", value="业务资料已确认").classes("grow")
+                        refresh_review_button = ui.button("刷新候选", icon="refresh")
                     review_list = ui.column().classes("w-full gap-3")
                     with review_list:
                         ui.label("点击“刷新候选”加载待审核词条。")
@@ -347,12 +333,10 @@ def register_support_ui(
                         release_note = ui.input(
                             "发布说明", placeholder="例如：新增会员产品词"
                         ).classes("grow")
-                        publish_button = ui.button(
-                            "发布新版本", icon="publish", color="positive"
+                        publish_button = ui.button("发布新版本", icon="publish", color="positive")
+                        refresh_versions_button = ui.button("刷新版本", icon="refresh").props(
+                            "flat"
                         )
-                        refresh_versions_button = ui.button(
-                            "刷新版本", icon="refresh"
-                        ).props("flat")
                     with ui.row().classes("w-full items-start gap-5"):
                         version_table = ui.table(
                             columns=[
@@ -369,15 +353,15 @@ def register_support_ui(
                         with ui.card().classes("w-full lg:w-[390px] workbench-card"):
                             with ui.row().classes("w-full justify-between items-center"):
                                 ui.label("当前发布制品").classes("text-subtitle1 font-bold")
-                                artifact_button = ui.button(
-                                    "查看", icon="description"
-                                ).props("flat")
-                            artifact_meta = ui.label("尚未加载").classes(
-                                "text-caption text-grey-7"
+                                artifact_button = ui.button("查看", icon="description").props(
+                                    "flat"
+                                )
+                            artifact_meta = ui.label("尚未加载").classes("text-caption text-grey-7")
+                            artifact_preview = (
+                                ui.textarea("Jieba词典预览")
+                                .props("readonly autogrow")
+                                .classes("w-full")
                             )
-                            artifact_preview = ui.textarea(
-                                "Jieba词典预览"
-                            ).props("readonly autogrow").classes("w-full")
 
                 with ui.tab_panel(status_tab):
                     _render_capabilities(intent_provider_name=intent_provider_name)
@@ -419,7 +403,7 @@ def register_support_ui(
                 ui.chat_message(content, name=current_actor.display_name, sent=True)
                 with ui.chat_message(name="BiliSupport AI"):
                     route_label = ui.label("").classes("text-caption text-grey-7")
-                    route_detail = ui.label("").classes("text-caption text-grey-7")
+                    route_detail = ui.markdown("").classes("text-caption text-grey-7")
                     answer = ui.markdown("")
             question.value = ""
             complete = ""
@@ -432,10 +416,8 @@ def register_support_ui(
                 ):
                     if chunk.routing is not None:
                         mock_label = " · Mock下游" if chunk.routing.mocked_downstream else ""
-                        route_label.set_text(
-                            f"路由：{chunk.routing.target.value}{mock_label}"
-                        )
-                        route_detail.set_text(_routing_details(chunk.routing))
+                        route_label.set_text(f"路由：{chunk.routing.target.value}{mock_label}")
+                        route_detail.set_content(_routing_details(chunk.routing))
                     complete += chunk.delta
                     answer.set_content(complete)
             except AppError as exc:
@@ -540,9 +522,7 @@ def register_support_ui(
                 message = exc.message if isinstance(exc, AppError) else str(exc)
                 ui.notify(message, type="negative")
                 return
-            term_form_result.set_text(
-                f"已写入：{result.term} · 状态 {result.status.value}"
-            )
+            term_form_result.set_text(f"已写入：{result.term} · 状态 {result.status.value}")
             term_input.value = ""
             aliases_input.value = ""
             ui.notify("候选词已写入MySQL", type="positive")
@@ -602,17 +582,13 @@ def register_support_ui(
                                     "通过",
                                     icon="check",
                                     color="positive",
-                                    on_click=lambda _, term_id=item.id: review_term(
-                                        term_id, True
-                                    ),
+                                    on_click=lambda _, term_id=item.id: review_term(term_id, True),
                                 )
                                 ui.button(
                                     "拒绝",
                                     icon="close",
                                     color="negative",
-                                    on_click=lambda _, term_id=item.id: review_term(
-                                        term_id, False
-                                    ),
+                                    on_click=lambda _, term_id=item.id: review_term(term_id, False),
                                 ).props("outline")
 
         async def review_term(term_id: str, approved: bool) -> None:
@@ -640,9 +616,7 @@ def register_support_ui(
                 ui.notify("请输入发布说明", type="warning")
                 return
             try:
-                version = await dictionary_service.publish(
-                    actor=actor(), release_note=note
-                )
+                version = await dictionary_service.publish(actor=actor(), release_note=note)
             except AppError as exc:
                 ui.notify(exc.message, type="negative")
                 return
@@ -717,8 +691,7 @@ def _render_overview(
     with ui.row().classes("w-full gap-4"):
         for title, description, icon, status, destination in destinations:
             with ui.card().classes(
-                "feature-card workbench-card w-full sm:w-[calc(50%-8px)] "
-                "lg:w-[calc(33.333%-12px)]"
+                "feature-card workbench-card w-full sm:w-[calc(50%-8px)] lg:w-[calc(33.333%-12px)]"
             ):
                 with ui.row().classes("w-full justify-between items-start"):
                     ui.icon(str(icon), size="36px", color="primary")
@@ -776,26 +749,20 @@ def _render_intent(
         ui.badge(f"路由：{decision.route.value}", color="primary")
         ui.badge(f"风险：{decision.risk.value}", color="secondary")
         ui.label(f"置信度：{decision.confidence:.2f}")
-    ui.label(
-        f"情绪：{decision.sentiment.value} · 来源：{decision.source.value}"
-    ).classes("text-caption")
+    ui.label(f"情绪：{decision.sentiment.value} · 来源：{decision.source.value}").classes(
+        "text-caption"
+    )
     if rule_id:
         ui.label(f"规则：{rule_id}").classes("text-caption text-grey-7")
     if applied_policy_ids:
-        ui.label("兜底策略：" + "、".join(applied_policy_ids)).classes(
-            "text-caption text-grey-7"
-        )
+        ui.label("兜底策略：" + "、".join(applied_policy_ids)).classes("text-caption text-grey-7")
     for item in decision.intents:
-        ui.chip(
-            f"{item.domain.value} + {item.action.value} ({item.confidence:.2f})"
-        )
+        ui.chip(f"{item.domain.value} + {item.action.value} ({item.confidence:.2f})")
     for entity in decision.entities:
         normalized = f" → {entity.normalized_value}" if entity.normalized_value else ""
         ui.label(f"{entity.type.value}: {entity.raw_value}{normalized}")
     if decision.needs_clarification:
-        ui.label(f"需要澄清：{decision.clarification_question}").classes(
-            "text-orange"
-        )
+        ui.label(f"需要澄清：{decision.clarification_question}").classes("text-orange")
 
 
 def _routing_details(summary: CustomerServiceRouteSummary) -> str:
@@ -805,37 +772,65 @@ def _routing_details(summary: CustomerServiceRouteSummary) -> str:
     if classification_error:
         details.append(f"意图识别失败：{classification_error}")
     if retrieval is not None:
-        details.append(
-            f"检索：{retrieval.mode.value} · 证据：{retrieval.evidence_count}条"
-        )
+        details.append(f"检索：{retrieval.mode.value} · 证据：{retrieval.evidence_count}条")
         if retrieval.policy is not None:
             details.append(
-                f"策略：{retrieval.policy.policy_id} · "
-                f"决策：{retrieval.policy.decision.value}"
+                f"策略：{retrieval.policy.policy_id} · 决策：{retrieval.policy.decision.value}"
             )
         if retrieval.coverage is not None:
             coverage = retrieval.coverage
             details.append(f"覆盖：{len(coverage.covered)}/{len(coverage.required)}")
             if coverage.missing:
                 details.append("缺失：" + "、".join(coverage.missing))
+        if retrieval.used_evidence_ids:
+            details.append("实际引用：" + "、".join(retrieval.used_evidence_ids))
         if retrieval.citations:
             details.append(
-                "来源："
-                + "、".join(
-                    f"[{item.evidence_id}] {item.document_title}"
+                "候选证据：\n"
+                + "\n".join(
+                    f"- **[{item.evidence_id}] {item.document_title}**"
+                    f"{_citation_location(item.heading_path, item.page_numbers)}："
+                    f"{item.excerpt or '暂无摘要'}"
                     for item in retrieval.citations
                 )
             )
+        if retrieval.verification is not None:
+            verification = retrieval.verification
+            details.append(
+                f"声明校验：{verification.decision.value} "
+                f"（支持{verification.supported_count}、部分{verification.partial_count}、"
+                f"不支持{verification.unsupported_count}、冲突{verification.conflict_count}、"
+                f"未知{verification.unknown_count}）"
+            )
+            details.append(
+                "校验器："
+                f"{verification.provider} · {verification.mode.value} · "
+                f"{verification.model or '规则门禁'} · {verification.latency_ms:.0f}ms"
+            )
+            if verification.error_code is not None:
+                details.append(f"校验异常：{verification.error_code}")
+        if retrieval.grounding_error_code:
+            details.append(f"回答校验：{retrieval.grounding_error_code}")
         if retrieval.error_code:
             details.append(f"知识服务：{retrieval.error_code}")
-    return " · ".join(details)
+    return "\n\n".join(details)
+
+
+def _citation_location(
+    heading_path: tuple[str, ...],
+    page_numbers: tuple[int, ...],
+) -> str:
+    """把Word/Markdown章节和PDF页码压缩成可读定位文本。"""
+
+    parts: list[str] = []
+    if heading_path:
+        parts.append(" > ".join(heading_path))
+    if page_numbers:
+        parts.append("第" + "、".join(str(item) for item in page_numbers) + "页")
+    return " · " + " · ".join(parts) if parts else ""
 
 
 def _split_labels(value: str) -> list[str]:
     return list(
-        dict.fromkeys(
-            item.strip()
-            for item in value.replace("，", ",").split(",")
-            if item.strip()
-        )
+        dict.fromkeys(item.strip() for item in value.replace("，", ",").split(",") if item.strip())
     )

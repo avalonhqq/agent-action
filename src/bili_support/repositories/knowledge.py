@@ -39,6 +39,16 @@ class ValidatedKnowledgeChild:
     document: KnowledgeDocument
 
 
+@dataclass(frozen=True, slots=True)
+class ActiveLexicalChild:
+    """构建ES读快照所需的活动Child及完整MySQL事实。"""
+
+    chunk: KnowledgeChunk
+    index_version: KnowledgeIndexVersion
+    document_version: KnowledgeDocumentVersion
+    document: KnowledgeDocument
+
+
 class KnowledgeRepository:
     """封装知识表查询，使 Service 专注版本、任务和权限规则。"""
 
@@ -318,6 +328,53 @@ class KnowledgeRepository:
         )
         return list(result)
 
+    async def active_children_for_lexical_sync(self) -> list[ActiveLexicalChild]:
+        """读取所有租户的活动Child；ES只是副本，MySQL仍是事实源。"""
+
+        rows = (
+            await self._session.execute(
+                select(
+                    KnowledgeChunk,
+                    KnowledgeIndexVersion,
+                    KnowledgeDocumentVersion,
+                    KnowledgeDocument,
+                )
+                .join(
+                    KnowledgeDocumentVersion,
+                    KnowledgeDocumentVersion.id == KnowledgeChunk.version_id,
+                )
+                .join(
+                    KnowledgeDocument,
+                    KnowledgeDocument.id == KnowledgeDocumentVersion.document_id,
+                )
+                .join(
+                    KnowledgeIndexVersion,
+                    KnowledgeIndexVersion.document_version_id
+                    == KnowledgeDocumentVersion.id,
+                )
+                .where(
+                    KnowledgeChunk.kind == "child",
+                    KnowledgeIndexVersion.status == "active",
+                    KnowledgeDocumentVersion.status == "ready",
+                    KnowledgeDocumentVersion.is_current.is_(True),
+                    KnowledgeDocument.status == "active",
+                )
+                .order_by(
+                    KnowledgeIndexVersion.id,
+                    KnowledgeChunk.ordinal,
+                )
+            )
+        ).all()
+        return [
+            ActiveLexicalChild(
+                chunk=row[0],
+                index_version=row[1],
+                document_version=row[2],
+                document=row[3],
+            )
+            for row in rows
+        ]
+
     async def list_index_versions(
         self,
         document_version_id: str,
@@ -367,6 +424,7 @@ class KnowledgeRepository:
                 .where(
                     KnowledgeIndexVersion.status == "active",
                     KnowledgeDocumentVersion.status == "ready",
+                    KnowledgeDocumentVersion.is_current.is_(True),
                     KnowledgeDocument.status == "active",
                     KnowledgeDocument.created_by_user_id == owner_user_id,
                     KnowledgeDocument.business_domain == business_domain,
@@ -424,6 +482,7 @@ class KnowledgeRepository:
                     KnowledgeIndexVersion.id.in_(index_version_ids),
                     KnowledgeIndexVersion.status == "active",
                     KnowledgeDocumentVersion.status == "ready",
+                    KnowledgeDocumentVersion.is_current.is_(True),
                     KnowledgeDocument.status == "active",
                 )
             )
@@ -476,6 +535,28 @@ class KnowledgeRepository:
                 KnowledgeIndexVersion.id != except_index_version_id,
             )
             .values(status="superseded", finished_at=finished_at)
+        )
+
+    async def switch_current_document_version(
+        self,
+        *,
+        document_id: str,
+        current_version_id: str,
+    ) -> None:
+        """同一事务内只让新激活索引对应的内容版本成为current。"""
+
+        await self._session.execute(
+            update(KnowledgeDocumentVersion)
+            .where(KnowledgeDocumentVersion.document_id == document_id)
+            .values(is_current=False)
+        )
+        await self._session.execute(
+            update(KnowledgeDocumentVersion)
+            .where(
+                KnowledgeDocumentVersion.document_id == document_id,
+                KnowledgeDocumentVersion.id == current_version_id,
+            )
+            .values(is_current=True)
         )
 
     async def chunks_by_ids(

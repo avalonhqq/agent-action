@@ -169,10 +169,21 @@ def test_new_document_version_atomically_supersedes_old_active_index(
             f"/api/v1/knowledge/versions/{first_version_id}/indexes",
             headers=_headers(),
         )
+        document_versions = client.get(
+            f"/api/v1/knowledge/documents/{document_id}/versions",
+            headers=_headers(),
+        ).json()["data"]
 
     assert first_index["status"] == "active"
     assert second_index["status"] == "active"
     assert old_history.json()["data"][0]["status"] == "superseded"
+    current_by_id = {
+        item["id"]: item["is_current"] for item in document_versions
+    }
+    assert current_by_id == {
+        first_version_id: False,
+        second_version_id: True,
+    }
 
 
 def test_failed_index_job_can_retry_without_deleting_active_generation(

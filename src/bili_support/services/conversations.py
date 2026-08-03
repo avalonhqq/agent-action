@@ -15,13 +15,18 @@ from bili_support.core.database import Database
 from bili_support.core.exceptions import AppError, ResourceNotFoundError
 from bili_support.core.security import UserContext
 from bili_support.intent.types import BusinessDomain
+from bili_support.knowledge.claim_verification import (
+    ClaimSupportStatus,
+    GroundedVerificationDecision,
+    VerificationMode,
+)
 from bili_support.knowledge.evidence import (
     KnowledgeRetrievalTrace,
     build_knowledge_evidence,
 )
 from bili_support.knowledge.retrieval import RetrievalMode
 from bili_support.knowledge.retrieval_policy import RetrievalDecisionKind
-from bili_support.llm.service import ChatService
+from bili_support.llm.service import ChatService, GroundedChatCompletionResult
 from bili_support.llm.types import (
     ChatMessage,
     FinishReason,
@@ -66,16 +71,16 @@ class ConversationService:
     """
 
     def __init__(
-            self,
-            database: Database,
-            chat_service: ChatService,
+        self,
+        database: Database,
+        chat_service: ChatService,
         router: CustomerServiceRouter,
         knowledge_retrieval_service: KnowledgeRetrievalService,
         policy_retrieval_service: PolicyAwareKnowledgeRetriever | None = None,
-            customer_retrieval_mode: RetrievalMode = RetrievalMode.VECTOR,
-            customer_rerank_enabled: bool = False,
-            rerank_candidate_k: int = 10,
-            history_cache: ConversationHistoryCache | None = None,
+        customer_retrieval_mode: RetrievalMode = RetrievalMode.VECTOR,
+        customer_rerank_enabled: bool = False,
+        rerank_candidate_k: int = 10,
+        history_cache: ConversationHistoryCache | None = None,
     ) -> None:
         if not 1 <= rerank_candidate_k <= 20:
             raise ValueError("rerank_candidate_k must be between 1 and 20")
@@ -83,12 +88,9 @@ class ConversationService:
         self._chat = chat_service
         self._router = router
         self._customer_retrieval_mode = customer_retrieval_mode
-        self._policy_retrieval = (
-            policy_retrieval_service
-            or PolicyAwareKnowledgeRetriever(
-                knowledge_retrieval_service,
-                customer_rerank_enabled=customer_rerank_enabled,
-            )
+        self._policy_retrieval = policy_retrieval_service or PolicyAwareKnowledgeRetriever(
+            knowledge_retrieval_service,
+            customer_rerank_enabled=customer_rerank_enabled,
         )
         # 未提供缓存时使用空实现，避免到处判 None。
         self._history_cache = history_cache or NullConversationHistoryCache()
@@ -126,12 +128,12 @@ class ConversationService:
             return messages
 
     async def send(
-            self,
-            *,
-            actor: UserContext,
-            thread_id: str,
-            content: str,
-            request_id: str,
+        self,
+        *,
+        actor: UserContext,
+        thread_id: str,
+        content: str,
+        request_id: str,
     ) -> ConversationMessageResult:
         """非流式发送消息：路由 → 生成回答 → 持久化 → 返回结果。
 
@@ -170,18 +172,30 @@ class ConversationService:
                 )
                 prompt_version = "knowledge_retrieval:v1"
             elif route_plan.use_chat_model:
-                # LLM 路径：调用 ChatService 生成回答。
-                result = await self._chat.complete(
-                    request_id=request_id,
-                    user_message=content,
-                    history=history,
-                    evidence_context=execution.evidence_context,
-                )
-                answer = result.response.content
-                model = result.response.model
-                finish_reason = result.response.finish_reason
-                usage = result.response.usage
-                prompt_version = result.prompt_version
+                if execution.evidence_context is not None:
+                    grounded = await self._chat.complete_grounded(
+                        request_id=request_id,
+                        user_message=content,
+                        history=history,
+                        evidence_context=execution.evidence_context,
+                    )
+                    route_plan = _with_grounding_result(route_plan, grounded)
+                    answer = _publishable_grounded_answer(grounded)
+                    model = grounded.response.model
+                    finish_reason = grounded.response.finish_reason
+                    usage = grounded.response.usage
+                    prompt_version = grounded.prompt_version
+                else:
+                    result = await self._chat.complete(
+                        request_id=request_id,
+                        user_message=content,
+                        history=history,
+                    )
+                    answer = result.response.content
+                    model = result.response.model
+                    finish_reason = result.response.finish_reason
+                    usage = result.response.usage
+                    prompt_version = result.prompt_version
             else:
                 # 确定性路径：路由直接返回固定回复（安全拦截/澄清/转人工等）。
                 answer = _required_override(route_plan)
@@ -261,12 +275,12 @@ class ConversationService:
         )
 
     async def stream(
-            self,
-            *,
-            actor: UserContext,
-            thread_id: str,
-            content: str,
-            request_id: str,
+        self,
+        *,
+        actor: UserContext,
+        thread_id: str,
+        content: str,
+        request_id: str,
     ) -> AsyncGenerator[CustomerServiceStreamChunk, None]:
         """流式发送消息：首帧返回路由摘要，后续帧返回增量文本。
 
@@ -298,8 +312,8 @@ class ConversationService:
                 route_plan=route_plan,
             )
             route_plan = execution.route_plan
-            yield CustomerServiceStreamChunk(routing=route_plan.summary)
             if execution.response_override is not None:
+                yield CustomerServiceStreamChunk(routing=route_plan.summary)
                 response = execution.response_override
                 model = "deterministic-knowledge"
                 prompt_version = "knowledge_retrieval:v1"
@@ -315,29 +329,46 @@ class ConversationService:
                     usage=usage,
                 )
             elif route_plan.use_chat_model:
-                # LLM 流式路径。
-                model = self._chat.model
-                prompt_version = (
-                    self._chat.grounded_prompt_version
-                    if execution.evidence_context is not None
-                    else self._chat.prompt_version
-                )
-                async for chunk in self._chat.stream(
+                if execution.evidence_context is not None:
+                    # 结构化知识回答必须完整组装并验证后才能发布，不能边生成边泄露未校验Claim。
+                    grounded = await self._chat.complete_grounded(
                         request_id=request_id,
                         user_message=content,
                         history=history,
                         evidence_context=execution.evidence_context,
-                ):
-                    if chunk.delta:
-                        answer_parts.append(chunk.delta)
-                    usage = chunk.usage or usage
-                    yield CustomerServiceStreamChunk(
-                        delta=chunk.delta,
-                        finish_reason=chunk.finish_reason,
-                        usage=chunk.usage,
                     )
+                    route_plan = _with_grounding_result(route_plan, grounded)
+                    yield CustomerServiceStreamChunk(routing=route_plan.summary)
+                    response = _publishable_grounded_answer(grounded)
+                    model = grounded.response.model
+                    prompt_version = grounded.prompt_version
+                    usage = grounded.response.usage
+                    answer_parts.append(response)
+                    yield CustomerServiceStreamChunk(delta=response)
+                    yield CustomerServiceStreamChunk(
+                        finish_reason=grounded.response.finish_reason,
+                        usage=usage,
+                    )
+                else:
+                    yield CustomerServiceStreamChunk(routing=route_plan.summary)
+                    model = self._chat.model
+                    prompt_version = self._chat.prompt_version
+                    async for chunk in self._chat.stream(
+                        request_id=request_id,
+                        user_message=content,
+                        history=history,
+                    ):
+                        if chunk.delta:
+                            answer_parts.append(chunk.delta)
+                        usage = chunk.usage or usage
+                        yield CustomerServiceStreamChunk(
+                            delta=chunk.delta,
+                            finish_reason=chunk.finish_reason,
+                            usage=chunk.usage,
+                        )
             else:
                 # 确定性流式路径：一次性返回固定回复。
+                yield CustomerServiceStreamChunk(routing=route_plan.summary)
                 response = _required_override(route_plan)
                 model = "deterministic-routing"
                 prompt_version = "customer_service_router:v1"
@@ -422,9 +453,7 @@ class ConversationService:
                     question=question,
                     domain=domain,
                     actions=tuple(
-                        item.action
-                        for item in decision.intents
-                        if item.domain is domain
+                        item.action for item in decision.intents if item.domain is domain
                     ),
                     entities=decision.entities,
                     history=tuple(history[-20:]),
@@ -437,20 +466,14 @@ class ConversationService:
                 route_plan=route_plan,
                 domains=domains,
                 error_code=exc.code.value,
-                response=(
-                    "知识服务暂时不可用，本次没有根据不完整信息生成答案。"
-                    "请稍后重试。"
-                ),
+                response=("知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"),
             )
         except Exception:
             return self._knowledge_fallback(
                 route_plan=route_plan,
                 domains=domains,
                 error_code="knowledge_retrieval_failed",
-                response=(
-                    "知识服务暂时不可用，本次没有根据不完整信息生成答案。"
-                    "请稍后重试。"
-                ),
+                response=("知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"),
             )
 
         bundle = build_knowledge_evidence(
@@ -472,18 +495,13 @@ class ConversationService:
             }
         )
         updated_plan = route_plan.model_copy(
-            update={
-                "summary": route_plan.summary.model_copy(
-                    update={"retrieval": trace}
-                )
-            }
+            update={"summary": route_plan.summary.model_copy(update={"retrieval": trace})}
         )
         if selected_policy_result.quality.kind is RetrievalDecisionKind.REFUSE:
             return _KnowledgeExecution(
                 route_plan=updated_plan,
                 response_override=(
-                    "当前知识库中没有找到足够依据，或现有依据相关性不足，"
-                    "暂时无法确认该问题。"
+                    "当前知识库中没有找到足够依据，或现有依据相关性不足，暂时无法确认该问题。"
                 ),
             )
         if selected_policy_result.quality.kind is RetrievalDecisionKind.CLARIFY:
@@ -517,11 +535,7 @@ class ConversationService:
             error_code=error_code,
         )
         updated_plan = route_plan.model_copy(
-            update={
-                "summary": route_plan.summary.model_copy(
-                    update={"retrieval": trace}
-                )
-            }
+            update={"summary": route_plan.summary.model_copy(update={"retrieval": trace})}
         )
         return _KnowledgeExecution(
             route_plan=updated_plan,
@@ -529,12 +543,12 @@ class ConversationService:
         )
 
     async def _save_user_message(
-            self,
-            *,
-            actor: UserContext,
-            thread_id: str,
-            content: str,
-            request_id: str,
+        self,
+        *,
+        actor: UserContext,
+        thread_id: str,
+        content: str,
+        request_id: str,
     ) -> tuple[str, str, list[ChatMessage]]:
         """保存用户消息并返回 (会话ID, 消息ID, 对话历史)。
 
@@ -575,19 +589,19 @@ class ConversationService:
             return conversation.id, user_message.id, history
 
     async def _persist_outcome(
-            self,
-            *,
-            conversation_id: str,
-            user_message_id: str,
-            request_id: str,
-            operation: str,
-            status: str,
-            started: float,
-            usage: TokenUsage | None,
-            error_code: str | None = None,
-            assistant_content: str | None = None,
-            model: str | None = None,
-            prompt_version: str | None = None,
+        self,
+        *,
+        conversation_id: str,
+        user_message_id: str,
+        request_id: str,
+        operation: str,
+        status: str,
+        started: float,
+        usage: TokenUsage | None,
+        error_code: str | None = None,
+        assistant_content: str | None = None,
+        model: str | None = None,
+        prompt_version: str | None = None,
     ) -> None:
         """持久化本次请求的结果：助手消息 + ModelCall 审计记录。
 
@@ -648,9 +662,7 @@ class ConversationService:
         except RedisError:
             return None
 
-    async def _store_history(
-            self, thread_id: str, history: list[ChatMessage]
-    ) -> None:
+    async def _store_history(self, thread_id: str, history: list[ChatMessage]) -> None:
         """将对话历史写入 Redis 缓存，失败时静默忽略。"""
         try:
             await self._history_cache.set(thread_id, history)
@@ -658,7 +670,7 @@ class ConversationService:
             return
 
     async def _cached_history_by_conversation(
-            self, conversation_id: str
+        self, conversation_id: str
     ) -> tuple[str, list[ChatMessage], bool] | None:
         """通过 conversation_id 获取 (thread_id, 历史, 是否缓存命中)。
 
@@ -671,9 +683,7 @@ class ConversationService:
             history = await self._cached_history(conversation.thread_id)
             cache_hit = history is not None
             if history is None:
-                messages = await MessageRepository(session).list_for_conversation(
-                    conversation_id
-                )
+                messages = await MessageRepository(session).list_for_conversation(conversation_id)
                 history = [
                     ChatMessage(role=MessageRole(item.role), content=item.content)
                     for item in messages
@@ -682,7 +692,7 @@ class ConversationService:
 
     @staticmethod
     async def _owned_conversation(
-            session: AsyncSession, thread_id: str, user_id: str
+        session: AsyncSession, thread_id: str, user_id: str
     ) -> Conversation:
         """校验会话归属，不匹配时抛出 ResourceNotFoundError。"""
         conversation = await ConversationRepository(session).get_for_user(thread_id, user_id)
@@ -699,9 +709,66 @@ def _required_override(route_plan: CustomerServiceRoutePlan) -> str:
     return response
 
 
+def _publishable_grounded_answer(result: GroundedChatCompletionResult) -> str:
+    """执行8E发布策略：全量通过发原文，部分通过只用已核验Claim重建。"""
+
+    if result.error_code is not None or result.grounded_answer is None:
+        return (
+            "知识回答未通过结构或引用校验，本次没有展示未经验证的模型内容。"
+            "请换一种描述重试，或转人工核查。"
+        )
+    verification = result.verification
+    if verification is None:
+        return "知识校验服务未返回结果，本次已安全拦截。请稍后重试或转人工核查。"
+    if verification.mode is VerificationMode.SHADOW and not verification.hard_gate_failed:
+        return result.grounded_answer.answer
+    if verification.decision is GroundedVerificationDecision.PASS:
+        return result.grounded_answer.answer
+
+    supported = tuple(
+        claim for claim in verification.claims if claim.status is ClaimSupportStatus.SUPPORTED
+    )
+    if supported and not verification.hard_gate_failed:
+        # 不再调用生成模型二次改写，逐Claim拼接可追溯引用，避免重新引入幻觉。
+        statements = []
+        for claim in supported:
+            text = claim.claim_text.rstrip("。！？； ")
+            citations = "".join(f"[{item}]" for item in claim.evidence_ids)
+            statements.append(f"{text}{citations}。")
+        return "".join(statements) + "其余内容证据不足，建议补充信息或转人工核查。"
+
+    if verification.decision is GroundedVerificationDecision.DEGRADE:
+        return "当前证据或语义校验不足，无法形成可靠回答。请缩小问题范围或转人工核查。"
+    return "当前生成内容存在缺少证据支持或证据冲突，本次已安全拦截。请补充信息或转人工核查。"
+
+
+def _with_grounding_result(
+    route_plan: CustomerServiceRoutePlan,
+    result: GroundedChatCompletionResult,
+) -> CustomerServiceRoutePlan:
+    """把实际引用和验证结论附加到公开Trace，候选证据与最终引用由此分离。"""
+
+    retrieval = route_plan.summary.retrieval
+    if retrieval is None:
+        return route_plan
+    used_ids = (
+        result.grounded_answer.used_evidence_ids if result.grounded_answer is not None else ()
+    )
+    updated_retrieval = retrieval.model_copy(
+        update={
+            "used_evidence_ids": used_ids,
+            "verification": result.verification,
+            "grounding_error_code": result.error_code,
+        }
+    )
+    return route_plan.model_copy(
+        update={"summary": route_plan.summary.model_copy(update={"retrieval": updated_retrieval})}
+    )
+
+
 def _routed_operation(
-        base: str,
-        route_plan: CustomerServiceRoutePlan | None,
+    base: str,
+    route_plan: CustomerServiceRoutePlan | None,
 ) -> str:
     """生成 ModelCall 的 operation 标识：base:target 或 base:routing_error。"""
     if route_plan is None:

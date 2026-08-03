@@ -808,3 +808,135 @@ flowchart TD
 
 当前工作台使用统一管理Token。商业部署仍需在网关或身份服务中将“知识上传、词条提交、审核、发布”
 拆成不同RBAC权限，并为发布动作增加双人审批。
+
+### 7.2 首批领域词候选（已完成）
+
+`data/fixtures/dictionary_terms_v1.json`保存首批可审计业务词表：8个业务域各6条，共48条；每条包含
+规范词、别名、词条类型、Jieba词频、来源类型和来源版本。`dictionary_seed.py`严格校验JSON后调用
+`KnowledgeDictionaryService.create_candidate`，不直接执行SQL，因此继续复用按业务域去重、创建人审计
+和`candidate`状态约束。
+
+首次导入结果为`inserted=48`，第二次重复运行结果为`inserted=0, skipped=48`，证明导入是幂等的。
+48条最初均进入候选区，没有批量自动批准；随后已由用户在工作台完成审核并发布为active v1。
+规范词和别名展开后的Jieba制品共144行。
+
+### 7.3 发布词典接入运行时检索（已完成）
+
+词典版本新增`manifest_json`，冻结规范词、别名、业务域、类型和词频。Jieba文本负责分词，Manifest负责
+恢复“别名属于哪个规范词”的语义关系，两者共同构成不可变发布快照。发布后Service使用同目录临时文件
+和原子替换同步运行时制品；应用启动时也以MySQL active版本为事实源执行自愈同步。
+
+`JiebaSearchTokenizer.cache_version`由词典文件时间戳和大小生成。文件变化时创建新的独立Tokenizer，
+随后`KnowledgeRetrievalService`把该版本加入BM25缓存键，确保不仅查询重新分词，已有Child文档词频也会
+整体重建。Vector通道不依赖Jieba，无需重建Milvus向量。
+
+补检索在首次Parent仍缺少必要实体时最多执行一次。必要实体现在由Intent产品实体、内置受控词和当前
+业务域active Manifest共同产生；覆盖检查仍同时检查`document_title + parent.content`。candidate和仅
+approved但未发布的词不会进入实体覆盖，保持运营发布门禁。
+
+本地v1发布早于Manifest迁移，启动同步通过“当前approved集合重建制品SHA与active SHA完全一致”的
+条件完成安全回填；最终active Manifest为48条，运行时Jieba文件为144行。哈希不一致时不会回填，避免
+把后续approved但未发布的词污染旧版本。
+
+## 8. 7E：Elasticsearch BM25与自动同步（已完成）
+
+### 8.1 目标与架构
+
+进程内BM25适合学习算法和确定性测试，但多进程部署会重复占用内存，索引无法跨实例共享，也缺少成熟的
+倒排索引运维能力。因此生产运行时词法通道迁移到Elasticsearch，Milvus向量通道和MySQL事实源保持不变。
+
+```mermaid
+flowchart LR
+    M["MySQL活动知识/active词典"] --> S["LexicalIndexSyncService"]
+    S --> N["新ES物理索引"]
+    N --> A["原子切换read alias"]
+    Q["客服问题"] --> V["Milvus Vector"]
+    Q --> B["ES BM25 + domain_terms"]
+    V --> R["RRF"]
+    B --> R
+    R --> C["MySQL权限与活动版本复核"]
+    C --> P["Small-to-Big Parent"]
+```
+
+### 8.2 代码职责与阅读路线
+
+1. `knowledge/lexical_store.py`：定义写入记录、查询、命中和Store协议，上层不依赖ES SDK。
+2. `knowledge/elasticsearch_store.py`：CJK Analyzer、严格Mapping、Bulk写入、Alias切换和BM25查询。
+3. `repositories/knowledge.py`：只读取MySQL中ready文档与active索引的Child快照。
+4. `services/lexical_sync.py`：组合知识快照与active词典，生成generation并串行重建。
+5. `services/indexing.py`与`services/dictionary.py`：索引激活、词典发布后触发自动同步。
+6. `services/retrieval.py`：BM25模式调用ES，Hybrid模式与Milvus并行并继续使用RRF。
+7. `knowledge/lexical_sync_cli.py`：首次初始化、故障修复和运维手工同步入口。
+8. `main.py`：依赖装配、启动自愈、`/ready`检查和资源关闭。
+
+### 8.3 为什么使用版本索引和Alias
+
+不能直接清空线上索引再逐条写入，否则写入期间用户会看到空结果或半量结果。当前实现以活动索引ID集合和
+词典SHA生成generation，写入`bili-support-child-{generation}`；全部成功后才把
+`bili-support-child-read`原子切向新索引。失败时旧Alias不动，相同generation重复同步直接复用。
+
+### 8.4 自动同步边界
+
+- 应用启动同步：修复应用停机期间的数据库与ES漂移。
+- 知识索引激活同步：新版本成为MySQL active后刷新整个ES快照。
+- 领域词典发布同步：把新active Manifest匹配成Child的`domain_terms`后重建。
+- 手工CLI同步：用于首次灌数和运维修复。
+
+当前教学版在请求流程内执行全量同步，并用进程内Lock防止单实例并发重建。商业生产版应把触发事件写入
+Outbox，由任务队列Worker执行；再增加分布式锁、重试、旧索引保留策略和告警。这个扩展不会改变
+`LexicalStore`或检索服务接口。
+
+### 8.5 本步骤思考题与答案
+
+**Q：ES是否替换Milvus或MySQL？**
+
+答：都不替换。MySQL是事实源，Milvus处理语义向量近邻，ES处理词法BM25。两路候选经RRF融合后仍回
+MySQL复核权限和活动版本。
+
+**Q：为什么ES索引里还要保存权限和活动索引ID？**
+
+答：它们用于召回前过滤，减少无权候选和过期版本；但ES是派生副本，因此命中后仍必须由MySQL再校验，
+不能只信任索引中的冗余字段。
+
+**Q：为什么领域词典不用SmartCN插件直接完成？**
+
+答：SmartCN自身不可配置项目业务词典。当前使用内置CJK分析器保证容器开箱可用，再把已审核active词条
+映射为keyword类型的`domain_terms`并提高权重，保留运营审核、版本和回滚能力。
+
+**Q：全量同步是否能直接用于大规模生产？**
+
+答：当前175个Child适合全量快照，结构最清楚且切换安全。数据增长后应保留全量重建作为修复能力，同时
+增加CDC/Outbox增量写入；Alias仍用于Schema、Analyzer或Embedding版本升级时的全量切换。
+
+### 8.6 查询资格改为current状态（已完成）
+
+用户查询从未要求前端传入版本号；本次进一步把内部词法查询从`index_version_id`过滤改为业务状态过滤。
+`knowledge_document_versions.is_current`成为MySQL当前内容事实，索引激活事务会同时把同一逻辑文档旧版本
+设为false、新版本设为true。Repository只选择：
+
+```text
+document.status = active
+document_version.status = ready
+document_version.is_current = true
+index_version.status = active
+```
+
+ES v2 Mapping保存`document_active`、`version_current`和`index_active`三个布尔字段，查询再叠加owner、
+business_domain和access_scope，不使用版本号决定资格。Milvus继续接收MySQL生成的活动索引ID白名单，
+防止现有Collection中的旧向量参与召回。版本ID不会删除，它仍用于候选身份一致性复核、引用定位、审计和
+回滚。文档软删除也会触发ES快照重建。
+
+## 9. 第7周最终总结
+
+第7周把第6周“能够向量检索”提升为“能够安全决定是否回答”的商业RAG检索层。Vector负责语义召回，
+中文Jieba/BM25负责产品名、错误码和精确表达，二者用RRF按排名融合，避免直接混加不同分数空间。
+Child命中经过MySQL权限和版本复核后恢复Parent，可选Reranker只做增强，失败时回退RRF顺序。
+
+RetrievalPolicy按照意图的业务域和动作选择预算与阈值；多实体问题先检查`document_title + parent.content`
+覆盖，不完整时最多执行一次受控补检索，最终确定性输出回答、澄清或拒答。词典运营补齐candidate、审核、
+不可变版本、Manifest、原子部署、Jieba热加载和BM25缓存重建；48条规范词已经审核发布为active v1，
+展开别名后形成144行运行时制品。
+
+统一工作台使问答、知识上传、领域词、审核和发布都能从`/support/`操作。至此系统已经解决“找什么、
+从哪里找、找到多少才允许回答”，但尚未系统验证“模型生成的每一句话是否真的被证据支持”。这正是
+第8周证据约束生成与RAG评估要解决的问题。

@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import FastAPI
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
+from structlog import get_logger
 
 from bili_support.api.error_handlers import register_exception_handlers
 from bili_support.api.router import create_api_router
@@ -29,10 +30,16 @@ from bili_support.intent.hybrid import HybridIntentClassifier
 from bili_support.intent.policies import HybridIntentPolicy
 from bili_support.intent.rules import RuleIntentClassifier
 from bili_support.knowledge.chunk_strategies import StrategySelector
+from bili_support.knowledge.claim_verification import (
+    ClaimVerifier,
+    TransformersNliClaimVerifier,
+)
+from bili_support.knowledge.elasticsearch_store import ElasticsearchLexicalStore
 from bili_support.knowledge.embedding import (
     DeterministicHashEmbeddingProvider,
     EmbeddingProvider,
 )
+from bili_support.knowledge.lexical_store import LexicalStore
 from bili_support.knowledge.loaders import create_default_loader_registry
 from bili_support.knowledge.rerank_factory import build_rerank_provider
 from bili_support.knowledge.reranking import RerankProvider
@@ -59,23 +66,28 @@ from bili_support.services.conversations import ConversationService
 from bili_support.services.dictionary import KnowledgeDictionaryService
 from bili_support.services.indexing import KnowledgeIndexingService
 from bili_support.services.knowledge import KnowledgeIngestionService
+from bili_support.services.lexical_sync import LexicalIndexSyncService
 from bili_support.services.policy_retrieval import PolicyAwareKnowledgeRetriever
 from bili_support.services.retrieval import KnowledgeRetrievalService
 from bili_support.ui import register_support_ui
 
+logger = get_logger(__name__)
+
 
 def create_app(
-        settings: Settings | None = None,
-        *,
-        llm_provider: LLMProvider | None = None,
-        intent_provider: LLMProvider | None = None,
-        usage_recorder: UsageRecorder | None = None,
-        database: Database | None = None,
-        history_cache: ConversationHistoryCache | None = None,
-        embedding_provider: EmbeddingProvider | None = None,
-        vector_store: VectorStore | None = None,
-        rerank_provider: RerankProvider | None = None,
-        bm25_tokenizer: SearchTokenizer | None = None,
+    settings: Settings | None = None,
+    *,
+    llm_provider: LLMProvider | None = None,
+    intent_provider: LLMProvider | None = None,
+    usage_recorder: UsageRecorder | None = None,
+    database: Database | None = None,
+    history_cache: ConversationHistoryCache | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    vector_store: VectorStore | None = None,
+    lexical_store: LexicalStore | None = None,
+    rerank_provider: RerankProvider | None = None,
+    bm25_tokenizer: SearchTokenizer | None = None,
+    claim_verifier: ClaimVerifier | None = None,
 ) -> FastAPI:
     """使用显式注入或缓存配置创建完整 FastAPI 应用。"""
     current_settings = settings or get_settings()
@@ -88,15 +100,22 @@ def create_app(
     )
     # 同一 Registry 保证回答与意图 Prompt 的版本解析方式一致。
     prompt_registry = create_default_prompt_registry()
-    current_rerank_provider = (
-        rerank_provider
-        or build_rerank_provider(
-            settings=current_settings,
-            llm_provider=provider,
-            prompt_registry=prompt_registry,
-        )
+    current_rerank_provider = rerank_provider or build_rerank_provider(
+        settings=current_settings,
+        llm_provider=provider,
+        prompt_registry=prompt_registry,
     )
     recorder = usage_recorder or InMemoryUsageRecorder()
+    current_claim_verifier = claim_verifier or TransformersNliClaimVerifier(
+        model_name=current_settings.claim_verification_model,
+        cache_dir=current_settings.claim_verification_cache_dir,
+        device=current_settings.claim_verification_device,
+        mode=current_settings.claim_verification_mode,
+        entailment_threshold=current_settings.claim_entailment_threshold,
+        contradiction_threshold=current_settings.claim_contradiction_threshold,
+        max_length=current_settings.claim_verification_max_length,
+        local_files_only=current_settings.claim_verification_local_files_only,
+    )
     current_database = database or Database(
         current_settings.database_url,
         echo=current_settings.database_echo,
@@ -122,6 +141,8 @@ def create_app(
         temperature=current_settings.llm_temperature,
         max_tokens=current_settings.llm_max_tokens,
         timeout_seconds=current_settings.llm_timeout_seconds,
+        grounded_parse_retries=current_settings.grounded_parse_retries,
+        claim_verifier=current_claim_verifier,
     )
     # 模型分类器负责开放语义；混合分类器在调用前短路精确规则，调用后执行安全兜底。
     model_intent_classifier = IntentClassifier(
@@ -139,23 +160,50 @@ def create_app(
         model_classifier=model_intent_classifier,
         policy=HybridIntentPolicy(),
     )
+    configured_lexical_store: LexicalStore | None = (
+        ElasticsearchLexicalStore(
+            url=current_settings.elasticsearch_url,
+            index_prefix=current_settings.elasticsearch_index_prefix,
+            read_alias=current_settings.elasticsearch_read_alias,
+            request_timeout_seconds=(current_settings.elasticsearch_request_timeout_seconds),
+            batch_size=current_settings.elasticsearch_batch_size,
+            username=current_settings.elasticsearch_username,
+            password=(
+                current_settings.elasticsearch_password.get_secret_value()
+                if current_settings.elasticsearch_password is not None
+                else None
+            ),
+        )
+        if current_settings.elasticsearch_enabled and lexical_store is None
+        else None
+    )
+    current_lexical_store = lexical_store or configured_lexical_store
+    lexical_sync_service = (
+        LexicalIndexSyncService(
+            database=current_database,
+            store=current_lexical_store,
+        )
+        if current_lexical_store is not None
+        else None
+    )
     knowledge_service = KnowledgeIngestionService(
         database=current_database,
         # Loader 注册表封装文件类型差异，Service 始终只处理统一 LoadedDocument。
         loaders=create_default_loader_registry(),
         chunk_strategies=StrategySelector(),
         # 当前使用本地文件系统；替换对象存储只需实现相同读写边界。
-        file_store=LocalKnowledgeFileStore(
-            Path(current_settings.knowledge_storage_dir)
-        ),
+        file_store=LocalKnowledgeFileStore(Path(current_settings.knowledge_storage_dir)),
         max_file_bytes=current_settings.knowledge_max_file_bytes,
+        lexical_sync_service=lexical_sync_service,
     )
-    dictionary_service = KnowledgeDictionaryService(current_database)
+    dictionary_service = KnowledgeDictionaryService(
+        current_database,
+        runtime_dictionary_path=current_settings.bm25_user_dictionary_path,
+        lexical_sync_service=lexical_sync_service,
+    )
     # 6B默认使用确定性Hash Mock验证索引管线；真实Embedding Provider在后续模型实验接入。
     current_embedding_provider = embedding_provider or (
-        DeterministicHashEmbeddingProvider(
-            dimension=current_settings.embedding_dimension
-        )
+        DeterministicHashEmbeddingProvider(dimension=current_settings.embedding_dimension)
     )
     # 测试和纯SQLite模式不建立Milvus连接；开启后使用新的v2 Collection Schema。
     current_vector_store = vector_store or (
@@ -165,13 +213,9 @@ def create_app(
             collection_name=current_settings.milvus_collection,
             dimension=current_settings.embedding_dimension,
             index_m=current_settings.milvus_index_m,
-            index_ef_construction=(
-                current_settings.milvus_index_ef_construction
-            ),
+            index_ef_construction=(current_settings.milvus_index_ef_construction),
             search_ef=current_settings.milvus_search_ef,
-            consistency_level=(
-                current_settings.milvus_consistency_level.value
-            ),
+            consistency_level=(current_settings.milvus_consistency_level.value),
         )
         if current_settings.milvus_enabled
         else None
@@ -186,9 +230,8 @@ def create_app(
         embedding_batch_size=current_settings.embedding_batch_size,
         embedding_timeout_seconds=current_settings.embedding_timeout_seconds,
         collection_name=current_settings.milvus_collection,
-        chunk_schema_version=(
-            current_settings.knowledge_index_chunk_schema_version
-        ),
+        chunk_schema_version=(current_settings.knowledge_index_chunk_schema_version),
+        lexical_sync_service=lexical_sync_service,
     )
     knowledge_retrieval_service = KnowledgeRetrievalService(
         database=current_database,
@@ -201,16 +244,22 @@ def create_app(
         rewriter=StandaloneQueryRewriter(),
         bm25_tokenizer=(
             bm25_tokenizer
-            or create_search_tokenizer(
-                kind=current_settings.bm25_tokenizer,
-                user_dictionary_path=(
-                    current_settings.bm25_user_dictionary_path
-                    if current_settings.bm25_tokenizer is BM25TokenizerKind.JIEBA
-                    else None
-                ),
-                jieba_hmm_enabled=current_settings.bm25_jieba_hmm_enabled,
+            or (
+                create_search_tokenizer(
+                    kind=current_settings.bm25_tokenizer,
+                    user_dictionary_path=(
+                        current_settings.bm25_user_dictionary_path
+                        if current_settings.bm25_tokenizer is BM25TokenizerKind.JIEBA
+                        else None
+                    ),
+                    jieba_hmm_enabled=current_settings.bm25_jieba_hmm_enabled,
+                )
+                if current_lexical_store is None
+                else None
             )
         ),
+        lexical_store=current_lexical_store,
+        dictionary_service=dictionary_service,
         rerank_provider=current_rerank_provider,
         rerank_model=current_settings.rerank_model,
         rerank_timeout_seconds=current_settings.rerank_timeout_seconds,
@@ -220,6 +269,7 @@ def create_app(
     policy_retrieval_service = PolicyAwareKnowledgeRetriever(
         knowledge_retrieval_service,
         customer_rerank_enabled=current_settings.customer_rerank_enabled,
+        dictionary_service=dictionary_service,
     )
     # 正式消息先完成意图路由；普通知识问题再进入真实检索和Grounded Prompt。
     customer_service_router = CustomerServiceRouter(intent_classifier)
@@ -241,21 +291,43 @@ def create_app(
         """管理数据库、Redis 和模型客户端的应用级生命周期。"""
         if current_settings.database_auto_create:
             await current_database.create_schema()
+        # 生产模式在接流量前完成NLI加载；失败直接阻止实例进入Ready，而非请求时降级Mock。
+        if current_settings.claim_verification_warmup and isinstance(
+            current_claim_verifier, TransformersNliClaimVerifier
+        ):
+            await current_claim_verifier.warmup()
+        # 数据库active版本是事实源；本地Jieba文件丢失或滞后时在启动阶段自愈。
+        try:
+            await dictionary_service.sync_active_artifact()
+        except Exception as exc:
+            # 运行时词典同步是可恢复增强；数据库故障应由/ready报告，不能让/health消失。
+            logger.warning(
+                "dictionary_runtime_sync_failed",
+                error_type=type(exc).__name__,
+            )
+        if lexical_sync_service is not None:
+            result = await lexical_sync_service.synchronize("application_startup")
+            if result.status == "failed":
+                logger.warning(
+                    "lexical_index_startup_sync_failed",
+                    error_code=result.error_code,
+                )
         try:
             yield
         finally:
             # 共享 Provider 只关闭一次；独立意图 Provider 才需要额外关闭。
             if isinstance(provider, OpenAICompatibleProvider):
                 await provider.aclose()
-            if (
-                    current_intent_provider is not provider
-                    and isinstance(current_intent_provider, OpenAICompatibleProvider)
+            if current_intent_provider is not provider and isinstance(
+                current_intent_provider, OpenAICompatibleProvider
             ):
                 await current_intent_provider.aclose()
             if redis_cache is not None:
                 await redis_cache.aclose()
             if current_vector_store is not None:
                 await current_vector_store.aclose()
+            if current_lexical_store is not None:
+                await current_lexical_store.aclose()
             await current_database.dispose()
 
     application = FastAPI(
@@ -286,6 +358,8 @@ def create_app(
     application.state.knowledge_retrieval_service = knowledge_retrieval_service
     application.state.dictionary_service = dictionary_service
     application.state.policy_retrieval_service = policy_retrieval_service
+    application.state.lexical_store = current_lexical_store
+    application.state.lexical_sync_service = lexical_sync_service
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -306,6 +380,13 @@ def create_app(
             "database": "ready",
             "llm_provider": "ready",
         }
+        if current_settings.claim_verification_warmup:
+            if not (
+                isinstance(current_claim_verifier, TransformersNliClaimVerifier)
+                and current_claim_verifier.ready
+            ):
+                raise ServiceNotReadyError()
+            checks["claim_verifier"] = "ready"
         if redis_cache is not None:
             try:
                 await redis_cache.ping()
@@ -322,6 +403,21 @@ def create_app(
                 if current_settings.milvus_required:
                     raise ServiceNotReadyError() from exc
                 checks["milvus"] = "degraded"
+        if current_lexical_store is not None:
+            try:
+                await current_lexical_store.ping()
+                checks["elasticsearch"] = "ready"
+            except Exception as exc:
+                if current_settings.elasticsearch_required:
+                    raise ServiceNotReadyError() from exc
+                checks["elasticsearch"] = "degraded"
+            last_sync = (
+                lexical_sync_service.last_result if lexical_sync_service is not None else None
+            )
+            if last_sync is not None and last_sync.status == "failed":
+                if current_settings.elasticsearch_required:
+                    raise ServiceNotReadyError()
+                checks["elasticsearch"] = "degraded"
         return ReadinessResponse(
             service=current_settings.app_name,
             version=current_settings.app_version,

@@ -39,6 +39,13 @@ def test_initial_migration_is_repeatable(
             for row in connection.execute("PRAGMA table_info(model_calls)")
             if row[1] == "operation"
         )
+        current_column = next(
+            row
+            for row in connection.execute(
+                "PRAGMA table_info(knowledge_document_versions)"
+            )
+            if row[1] == "is_current"
+        )
     reset_settings()
 
     assert {
@@ -56,5 +63,7 @@ def test_initial_migration_is_repeatable(
         "knowledge_dictionary_terms",
         "knowledge_dictionary_versions",
     } <= tables
-    assert revision == ("20260801_0006",)
+    assert revision == ("20260802_0008",)
     assert operation_column[2] == "VARCHAR(64)"
+    assert current_column[2] == "BOOLEAN"
+    assert current_column[3] == 1

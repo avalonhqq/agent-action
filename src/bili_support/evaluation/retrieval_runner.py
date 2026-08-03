@@ -39,6 +39,7 @@ class RetrievalEvaluator:
         rerank_model: str | None = None,
         rerank_candidate_k: int = 10,
         bm25_tokenizer: BM25TokenizerKind | None = None,
+        lexical_backend: str = "in_memory",
     ) -> None:
         self._service = service
         self._actor = actor
@@ -49,6 +50,7 @@ class RetrievalEvaluator:
         self._rerank_model = rerank_model
         self._rerank_candidate_k = rerank_candidate_k
         self._bm25_tokenizer = bm25_tokenizer
+        self._lexical_backend = lexical_backend
 
     async def evaluate(
         self,
@@ -63,6 +65,7 @@ class RetrievalEvaluator:
             dataset=dataset_name,
             case_count=len(cases),
             retrieval_mode=self._retrieval_mode,
+            lexical_backend=self._lexical_backend,
             bm25_tokenizer=(
                 self._bm25_tokenizer
                 if self._retrieval_mode in {RetrievalMode.BM25, RetrievalMode.HYBRID}

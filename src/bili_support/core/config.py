@@ -8,6 +8,7 @@ from functools import lru_cache
 from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
+from bili_support.knowledge.claim_verification import VerificationMode
 from bili_support.knowledge.reranking import RerankProviderKind
 from bili_support.knowledge.retrieval import RetrievalMode
 from bili_support.knowledge.tokenizers import BM25TokenizerKind
@@ -82,15 +83,25 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: SecretStr | None = None
     llm_model: str = "mock-support-model"
-    llm_structured_output_mode: LLMStructuredOutputMode = (
-        LLMStructuredOutputMode.JSON_SCHEMA
-    )
+    llm_structured_output_mode: LLMStructuredOutputMode = LLMStructuredOutputMode.JSON_SCHEMA
     llm_mock_response: str = "这是来自确定性 Mock Provider 的客服回复。"
     intent_mock_response: str = _DEFAULT_INTENT_MOCK_RESPONSE
     # 页面默认使用当前已评估的 Prompt；历史版本仍由离线评估器显式选择。
     intent_prompt_version: int = Field(default=3, ge=1)
     # 结构重试与 HTTP 重试分开计数，防止格式错误导致无限付费调用。
     intent_parse_retries: int = Field(default=1, ge=0, le=3)
+    # DeepSeek等json_object服务不执行完整Schema，结构失败时只允许一次独立重新生成。
+    grounded_parse_retries: int = Field(default=1, ge=0, le=2)
+    # 8E使用独立本地NLI验证Claim；默认强制执行，模型故障时失败关闭。
+    claim_verification_mode: VerificationMode = VerificationMode.ENFORCE
+    claim_verification_model: str = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+    claim_verification_cache_dir: str = "./data/models/huggingface"
+    claim_verification_device: str = "auto"
+    claim_verification_local_files_only: bool = False
+    claim_verification_warmup: bool = False
+    claim_entailment_threshold: float = Field(default=0.65, gt=0.0, lt=1.0)
+    claim_contradiction_threshold: float = Field(default=0.70, gt=0.0, lt=1.0)
+    claim_verification_max_length: int = Field(default=512, ge=64, le=1024)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
     llm_retry_base_delay: float = Field(default=0.1, ge=0)
     llm_temperature: float = Field(default=0.0, ge=0, le=2)
@@ -128,6 +139,16 @@ class Settings(BaseSettings):
     milvus_index_m: int = Field(default=16, ge=2, le=2048)
     milvus_index_ef_construction: int = Field(default=200, ge=8, le=4096)
     milvus_search_ef: int = Field(default=64, ge=1, le=4096)
+    # 7E运行时词法检索迁移到Elasticsearch；测试默认仍可使用进程内BM25。
+    elasticsearch_enabled: bool = False
+    elasticsearch_required: bool = False
+    elasticsearch_url: str = "http://127.0.0.1:9200"
+    elasticsearch_index_prefix: str = "bili-support-child"
+    elasticsearch_read_alias: str = "bili-support-child-read"
+    elasticsearch_username: str | None = None
+    elasticsearch_password: SecretStr | None = None
+    elasticsearch_request_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    elasticsearch_batch_size: int = Field(default=200, ge=1, le=2000)
     # 7A-2默认使用Jieba搜索模式；bigram保留为可重放的对照基线。
     bm25_tokenizer: BM25TokenizerKind = BM25TokenizerKind.JIEBA
     bm25_jieba_hmm_enabled: bool = False
@@ -171,6 +192,9 @@ class Settings(BaseSettings):
         "knowledge_index_chunk_schema_version",
         "milvus_uri",
         "milvus_collection",
+        "elasticsearch_url",
+        "elasticsearch_index_prefix",
+        "elasticsearch_read_alias",
         "bm25_user_dictionary_path",
         "rerank_model",
     )
@@ -192,19 +216,21 @@ class Settings(BaseSettings):
             raise ValueError("redis_required needs redis_enabled=True")
         if self.milvus_required and not self.milvus_enabled:
             raise ValueError("milvus_required needs milvus_enabled=True")
+        if self.elasticsearch_required and not self.elasticsearch_enabled:
+            raise ValueError("elasticsearch_required needs elasticsearch_enabled=True")
+        if bool(self.elasticsearch_username) != (self.elasticsearch_password is not None):
+            raise ValueError(
+                "elasticsearch_username and elasticsearch_password must be configured together"
+            )
         if self.milvus_search_ef < self.milvus_index_m:
             raise ValueError("milvus_search_ef must be at least milvus_index_m")
-        if (
-            self.customer_rerank_enabled
-            and self.rerank_provider is RerankProviderKind.DISABLED
-        ):
+        if self.customer_rerank_enabled and self.rerank_provider is RerankProviderKind.DISABLED:
             raise ValueError("customer_rerank_enabled needs a rerank provider")
         if self.customer_rerank_enabled and self.rerank_candidate_k < 5:
             raise ValueError("customer rerank candidate budget must be at least 5")
         if self.environment == Environment.PRODUCTION and (
             self.api_token.get_secret_value() == "local-demo-token"
-            or self.ui_storage_secret.get_secret_value()
-            == "local-ui-storage-secret-change-me"
+            or self.ui_storage_secret.get_secret_value() == "local-ui-storage-secret-change-me"
         ):
             raise ValueError("production secrets must be explicitly configured")
         if (

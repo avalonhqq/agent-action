@@ -168,6 +168,7 @@ class RetrievalEvaluationReport(BaseModel):
     dataset: str
     case_count: int = Field(ge=1)
     retrieval_mode: RetrievalMode
+    lexical_backend: str = "in_memory"
     bm25_tokenizer: BM25TokenizerKind | None = None
     embedding_model: str | None
     rerank_enabled: bool = False

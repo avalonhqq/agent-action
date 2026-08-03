@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import AsyncIterator
 
 from bili_support.llm.types import (
@@ -41,11 +43,12 @@ class MockLLMProvider:
         request: LLMRequest,
     ) -> LLMResponse:
         """Return the configured response as one complete result."""
+        response_text = self._response_for(request)
         return LLMResponse(
-            content=self._response_text,
+            content=response_text,
             model=self._model,
             finish_reason=FinishReason.STOP,
-            usage=self._calculate_usage(request),
+            usage=self._calculate_usage(request, response_text=response_text),
         )
 
     async def stream(
@@ -70,12 +73,14 @@ class MockLLMProvider:
     def _calculate_usage(
         self,
         request: LLMRequest,
+        *,
+        response_text: str | None = None,
     ) -> TokenUsage:
         """Return deterministic character counts labeled as mock usage."""
         prompt_tokens = sum(
             self._mock_token_count(message.content) for message in request.messages
         )
-        completion_tokens = self._mock_token_count(self._response_text)
+        completion_tokens = self._mock_token_count(response_text or self._response_text)
 
         return TokenUsage(
             prompt_tokens=prompt_tokens,
@@ -87,3 +92,33 @@ class MockLLMProvider:
     def _mock_token_count(text: str) -> int:
         """Count non-whitespace characters; this is not a real tokenizer."""
         return sum(1 for character in text if not character.isspace())
+
+    def _response_for(self, request: LLMRequest) -> str:
+        """Grounded结构化请求生成可校验本地样例，其余请求仍返回配置文本。"""
+
+        if request.structured_output is None or request.structured_output.name != "grounded_answer":
+            return self._response_text
+        user_content = request.messages[-1].content
+        match = re.search(
+            r"<knowledge_evidence_json>\s*(.*?)\s*</knowledge_evidence_json>",
+            user_content,
+            flags=re.DOTALL,
+        )
+        if match is None:
+            return self._response_text
+        try:
+            payload = json.loads(match.group(1))
+            evidence = payload["evidence"][0]
+            evidence_id = str(evidence["evidence_id"])
+            claim = str(evidence["content"]).strip()
+        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+            return self._response_text
+        return json.dumps(
+            {
+                "answer": f"{claim}[{evidence_id}]",
+                "claims": [{"text": claim, "evidence_ids": [evidence_id]}],
+                "used_evidence_ids": [evidence_id],
+                "completeness": "complete",
+            },
+            ensure_ascii=False,
+        )

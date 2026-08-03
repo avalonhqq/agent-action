@@ -1,9 +1,18 @@
 # 当前学习入口
 
-前七周已经完成。当前停在第8周开始前；下一模块先说明思路和任务，得到确认后再实施。
+前八周已经完成。第8周已形成结构化Grounded Answer、声明校验、RAG评估、可定位引用和Chat安全发布闭环；下一步为第9周LangGraph状态化工作流，实施前先讲思路并等待确认。
 
 第7周补充完成统一企业客服工作台：`/support/`现已覆盖问答、知识上传、领域词条、审核发布、
 版本制品和能力边界展示。
+
+领域词典运行时闭环已补齐：只有active发布版本会同步Jieba并参与补检索实体覆盖，发布后BM25缓存会按
+词典版本重建。48条初始化词已由用户审核并发布为active v1，运行时制品包含规范词和别名共144行。
+
+第7周补充7E已完成：生产BM25运行时迁移到Elasticsearch 9.4.2，当前MySQL活动知识的175个Child已写入
+版本索引；知识索引激活、词典发布和应用启动均会自动同步，读取Alias只在完整写入成功后原子切换。
+
+检索资格已改为状态驱动：用户查询不传版本号；MySQL使用`document.active + version.is_current +
+index.active`选择当前知识，ES使用对应布尔字段和owner过滤，版本ID只保留作内部复核、引用和审计。
 
 任务目标、实现提示、思考题、问题记录和实现结论统一维护在：
 
@@ -17,6 +26,7 @@
 - [6C 向量检索与 Small-to-Big](week6-learning-record.md#5-6c检索过滤与-small-to-big已完成)
 - [6D Golden Dataset 与 Recall@K](week6-learning-record.md#6-6dgolden-dataset-与-recallk已完成)
 - [第7周学习与任务记录](week7-learning-record.md)
+- [第8周学习与任务记录](week8-learning-record.md)
 - [7A 中文Tokenizer与BM25基线](week7-learning-record.md#2-7a中文tokenizer与bm25单路基线已完成)
 - [7A-2 Jieba搜索分词优化](week7-learning-record.md#210-7a-2jieba搜索分词优化已完成)
 - [7A-3 生产级领域词典管理](week7-learning-record.md#211-7a-3生产级领域词典管理已完成)
@@ -24,5 +34,6 @@
 - [7B Vector与BM25 RRF融合](week7-learning-record.md#4-7bvector--bm25-rrf融合已完成)
 - [7C Parent批量Rerank与失败降级](week7-learning-record.md#5-7cparent批量rerank与失败降级已完成)
 - [7D RetrievalPolicy、阈值与多实体覆盖](week7-learning-record.md#6-7dretrievalpolicy阈值与多实体覆盖已完成)
+- [7E Elasticsearch BM25与自动同步](week7-learning-record.md#8-7eelasticsearch-bm25与自动同步已完成)
 
 本文只提供入口，不重复保存每周任务内容。

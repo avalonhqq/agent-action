@@ -54,3 +54,17 @@ def test_factory_keeps_bigram_as_explicit_baseline() -> None:
 def test_jieba_rejects_missing_user_dictionary(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="does not exist"):
         JiebaSearchTokenizer(user_dictionary_path=tmp_path / "missing.txt")
+
+
+def test_jieba_hot_reloads_atomically_replaced_dictionary(tmp_path: Path) -> None:
+    dictionary = tmp_path / "business.txt"
+    dictionary.write_text("硬核会员 10000 nz\n", encoding="utf-8")
+    tokenizer = JiebaSearchTokenizer(user_dictionary_path=dictionary)
+    first_version = tokenizer.cache_version
+
+    replacement = tmp_path / "replacement.txt"
+    replacement.write_text("花火商单 11000 nz\n", encoding="utf-8")
+    replacement.replace(dictionary)
+
+    assert tokenizer.cache_version != first_version
+    assert "花火商单" in tokenizer.tokenize("花火商单报价")

@@ -33,6 +33,7 @@ from bili_support.schemas.knowledge import (
     RetrievalChildHitView,
     RetrievalParentView,
 )
+from bili_support.services.dictionary import KnowledgeDictionaryService
 from bili_support.services.retrieval import KnowledgeRetrievalService
 
 
@@ -56,10 +57,12 @@ class PolicyAwareKnowledgeRetriever:
         *,
         registry: RetrievalPolicyRegistry | None = None,
         customer_rerank_enabled: bool = False,
+        dictionary_service: KnowledgeDictionaryService | None = None,
     ) -> None:
         self._service = service
         self._registry = registry or create_default_retrieval_policy_registry()
         self._customer_rerank_enabled = customer_rerank_enabled
+        self._dictionary_service = dictionary_service
 
     async def retrieve(
         self,
@@ -89,9 +92,17 @@ class PolicyAwareKnowledgeRetriever:
                 rerank_candidate_k=policy.parent_candidate_k,
             ),
         )
+        published_entries = (
+            await self._dictionary_service.active_entries(
+                business_domain=domain.value,
+            )
+            if self._dictionary_service is not None
+            else ()
+        )
         required = extract_required_entities(
             question=question,
             intent_entities=entities,
+            published_entries=published_entries,
         )
         coverage = evaluate_coverage(entities=required, parents=view.parents)
 

@@ -99,6 +99,13 @@
 | 7A-2 | Jieba搜索分词优化 | 已完成 | 可替换Tokenizer；受控业务词典；Bigram/Jieba固定集对照 |
 | 7A-3 | 生产级领域词典管理 | 已完成 | 候选、审核、不可变版本、Mock来源、制品导出与回滚边界 |
 | 7UI | 统一企业客服工作台 | 已完成 | 问答、知识上传、词条写库、审核发布、制品预览和能力边界 |
+| 7DATA | 首批领域词候选 | 已完成 | 8个业务域、48个候选词、幂等导入、保留人工审核门禁 |
+| 7DICT-RUNTIME | 发布词典接入运行时 | 已完成 | Manifest快照、原子部署、Jieba热加载、BM25缓存重建、补检索覆盖 |
+| 7E | Elasticsearch BM25与自动同步 | 已完成 | ES 9.4.2；175个活动Child；版本索引、Alias切换、启动/激活/发布同步 |
+| 8A | Grounded Output Contract | 已完成 | 严格Claims、三方引用集合一致、v2 Prompt和证据ID白名单校验 |
+| 8B | Claim Verification | 已完成 | 声明支持度、数字事实、否定冲突、完整性和安全降级 |
+| 8C | RAG Evaluation | 已完成 | 6类固定集、Faithfulness、Relevancy、Citation指标和报告 |
+| 8D | 产品接入与复盘 | 已完成 | v4 Chat、最小直接引用、DeepSeek兼容重试和分层验证降级 |
 
 ## 每周复盘模板
 

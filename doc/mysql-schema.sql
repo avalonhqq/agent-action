@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_document_versions` (
   `size_bytes` int NOT NULL,
   `storage_key` varchar(255) NOT NULL,
   `status` varchar(16) NOT NULL,
+  `is_current` boolean NOT NULL DEFAULT false,
   `created_at` datetime NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_knowledge_versions_document_sha256` (`document_id`, `content_sha256`),
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_document_versions` (
   KEY `ix_knowledge_versions_document_id` (`document_id`),
   KEY `ix_knowledge_versions_content_sha256` (`content_sha256`),
   KEY `ix_knowledge_versions_document_created` (`document_id`, `created_at`),
+  KEY `ix_knowledge_versions_document_current` (`document_id`, `is_current`),
   CONSTRAINT `fk_knowledge_versions_document`
     FOREIGN KEY (`document_id`) REFERENCES `knowledge_documents` (`id`) ON DELETE CASCADE,
   CONSTRAINT `ck_knowledge_versions_size` CHECK (`size_bytes` > 0),
@@ -255,6 +257,7 @@ CREATE TABLE IF NOT EXISTS `knowledge_dictionary_versions` (
   `status` varchar(16) NOT NULL,
   `content_sha256` varchar(64) NOT NULL,
   `artifact_content` longtext NOT NULL,
+  `manifest_json` longtext NOT NULL COMMENT '规范词、别名、业务域和类型的不可变JSON快照',
   `term_count` int NOT NULL,
   `published_by_user_id` varchar(36) NOT NULL,
   `release_note` varchar(500) DEFAULT NULL,

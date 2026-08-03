@@ -9,6 +9,8 @@ from bili_support.main import create_app
 
 
 def _settings(tmp_path: Path) -> Settings:
+    runtime_dictionary = tmp_path / "runtime-dictionary.txt"
+    runtime_dictionary.write_text("", encoding="utf-8")
     return Settings(
         _env_file=None,
         database_url=(
@@ -16,6 +18,7 @@ def _settings(tmp_path: Path) -> Settings:
         ),
         database_auto_create=True,
         knowledge_storage_dir=str(tmp_path / "files"),
+        bm25_user_dictionary_path=str(runtime_dictionary),
         api_token="dictionary-test-token",
         ui_enabled=False,
     )
@@ -84,6 +87,18 @@ def test_candidate_review_publish_and_versioned_artifact(tmp_path: Path) -> None
     assert artifact.json()["data"]["term_count"] == 2
     assert "超级大会员 10000 nz" in artifact.json()["data"]["artifact_content"]
     assert "超会 10000 nz" in artifact.json()["data"]["artifact_content"]
+    assert artifact.json()["data"]["entries"] == [
+        {
+            "term": "超级大会员",
+            "aliases": ["超会"],
+            "business_domain": "membership",
+            "term_type": "product",
+            "frequency": 10000,
+        }
+    ]
+    assert (tmp_path / "runtime-dictionary.txt").read_text(encoding="utf-8") == (
+        artifact.json()["data"]["artifact_content"]
+    )
 
 
 def test_mock_source_stays_candidate_and_new_release_supersedes_old(

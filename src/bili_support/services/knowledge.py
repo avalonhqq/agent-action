@@ -37,6 +37,7 @@ from bili_support.schemas.knowledge import (
     KnowledgeVersionView,
     ParentChunkContextView,
 )
+from bili_support.services.lexical_sync import LexicalIndexSyncService
 
 
 class KnowledgeIngestionService:
@@ -51,6 +52,7 @@ class KnowledgeIngestionService:
             file_store: LocalKnowledgeFileStore,
             max_file_bytes: int,
             small_to_big: SmallToBigExpander | None = None,
+            lexical_sync_service: LexicalIndexSyncService | None = None,
     ) -> None:
         self._database = database
         self._loaders = loaders
@@ -58,6 +60,7 @@ class KnowledgeIngestionService:
         self._file_store = file_store
         self._max_file_bytes = max_file_bytes
         self._small_to_big = small_to_big or SmallToBigExpander()
+        self._lexical_sync_service = lexical_sync_service
 
     @property
     def max_file_bytes(self) -> int:
@@ -487,6 +490,8 @@ class KnowledgeIngestionService:
             document.status = "deleted"
             document.updated_at = datetime.now(UTC)
             await session.commit()
+        if self._lexical_sync_service is not None:
+            await self._lexical_sync_service.synchronize("knowledge_document_delete")
 
     async def _process(self, job_id: str) -> None:
         """执行一次解析尝试；用两段短事务包围数据库外的文件解析。"""

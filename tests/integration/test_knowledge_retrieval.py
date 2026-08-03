@@ -8,6 +8,12 @@ from fastapi.testclient import TestClient
 
 from bili_support.core.config import Settings
 from bili_support.knowledge.embedding import cosine_similarity
+from bili_support.knowledge.lexical_store import (
+    LexicalRebuildResult,
+    LexicalRecord,
+    LexicalSearchHit,
+    LexicalSearchQuery,
+)
 from bili_support.knowledge.reranking import (
     RerankItem,
     RerankRequest,
@@ -96,6 +102,75 @@ class _InMemoryVectorStore:
 
     async def aclose(self) -> None:
         return None
+
+
+class _InMemoryLexicalStore:
+    """模拟ES版本索引，用来验证自动同步与BM25读取边界。"""
+
+    def __init__(self) -> None:
+        self.records: tuple[LexicalRecord, ...] = ()
+        self.rebuild_count = 0
+        self.search_queries: list[LexicalSearchQuery] = []
+
+    async def ping(self) -> None:
+        return None
+
+    async def rebuild(
+        self,
+        *,
+        generation: str,
+        records: Sequence[LexicalRecord],
+    ) -> LexicalRebuildResult:
+        self.rebuild_count += 1
+        self.records = tuple(records)
+        return LexicalRebuildResult(
+            physical_index=f"test-{generation[:8]}",
+            generation=generation,
+            document_count=len(records),
+        )
+
+    async def search(
+        self,
+        query: LexicalSearchQuery,
+    ) -> tuple[LexicalSearchHit, ...]:
+        self.search_queries.append(query)
+        terms = {item for item in query.text.casefold() if not item.isspace()}
+        matches = [
+            record
+            for record in self.records
+            if record.document_active
+            and record.version_current
+            and record.index_active
+            and record.owner_user_id == query.owner_user_id
+            and record.business_domain == query.business_domain
+            and set(record.access_scope).intersection(query.allowed_scopes)
+            and terms.intersection(record.content.casefold())
+        ]
+        return tuple(
+            LexicalSearchHit(
+                chunk_id=record.chunk_id,
+                document_id=record.document_id,
+                version_id=record.version_id,
+                index_version_id=record.index_version_id,
+                score=float(len(matches) - rank),
+            )
+            for rank, record in enumerate(matches)
+        )
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _FailingRebuildLexicalStore(_InMemoryLexicalStore):
+    """ES节点可连接但索引同步失败，readiness不能把它误报为可用。"""
+
+    async def rebuild(
+        self,
+        *,
+        generation: str,
+        records: Sequence[LexicalRecord],
+    ) -> LexicalRebuildResult:
+        raise RuntimeError("simulated lexical rebuild failure")
 
 
 class _RecordingProvider(MockLLMProvider):
@@ -388,6 +463,80 @@ def test_bm25_mode_reuses_mysql_validation_and_small_to_big(
     assert store.search_count == 0
 
 
+def test_elasticsearch_bm25_auto_syncs_after_index_activation(
+    tmp_path: Path,
+) -> None:
+    """知识索引激活后自动刷新ES快照，BM25查询不再构建进程内索引。"""
+
+    vector_store = _InMemoryVectorStore()
+    lexical_store = _InMemoryLexicalStore()
+    with TestClient(
+        create_app(
+            _settings(tmp_path),
+            vector_store=vector_store,
+            lexical_store=lexical_store,
+        )
+    ) as client:
+        _upload_and_index(
+            client,
+            title="大会员到账FAQ",
+            access_scope="public",
+            content=(
+                "# 客服FAQ\n\n"
+                "Q：支付成功但会员没有到账怎么办？\n\n"
+                "A：超过30分钟请提供订单号并提交人工核查。"
+            ),
+        )
+        retrieved = client.post(
+            "/api/v1/knowledge/retrieve",
+            headers=_headers(),
+            json={
+                "query": "大会员支付成功未到账",
+                "business_domain": "membership",
+                "allowed_scopes": ["public"],
+                "retrieval_mode": "bm25",
+            },
+        )
+        records_after_index = lexical_store.records
+        deleted = client.delete(
+            f"/api/v1/knowledge/documents/{records_after_index[0].document_id}",
+            headers=_headers(),
+        )
+
+    assert retrieved.status_code == 200
+    assert deleted.status_code == 204
+    result = retrieved.json()["data"]
+    # 启动空快照、索引激活快照、文档删除快照。
+    assert lexical_store.rebuild_count >= 3
+    assert records_after_index
+    assert lexical_store.records == ()
+    assert lexical_store.search_queries[0].business_domain == "membership"
+    assert result["child_hits"][0]["source"] == "bm25"
+    assert "超过30分钟" in result["parents"][0]["parent"]["content"]
+    assert vector_store.search_count == 0
+
+
+def test_required_elasticsearch_is_not_ready_after_sync_failure(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path).model_copy(
+        update={
+            "elasticsearch_enabled": True,
+            "elasticsearch_required": True,
+        }
+    )
+    with TestClient(
+        create_app(
+            settings,
+            vector_store=_InMemoryVectorStore(),
+            lexical_store=_FailingRebuildLexicalStore(),
+        )
+    ) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+
+
 def test_hybrid_mode_rrf_merges_sources_before_small_to_big(
     tmp_path: Path,
 ) -> None:
@@ -651,10 +800,15 @@ def test_chat_routes_to_real_rag_and_streams_grounded_evidence(
     assert '"degraded": false' in streamed.text
     assert '"evidence_count": 1' in streamed.text
     assert '"document_title": "大会员到账FAQ"' in streamed.text
+    assert '"used_evidence_ids": ["E1"]' in streamed.text
+    assert '"decision": "pass"' in streamed.text
+    assert '"excerpt":' in streamed.text
     assert "event: delta" in streamed.text
     assert len(provider.requests) == 1
     request = provider.requests[0]
-    assert "只能依据本次提供的客服知识证据" in request.messages[0].content
+    assert "只能使用knowledge_evidence_json中的事实" in request.messages[0].content
+    assert request.structured_output is not None
+    assert request.structured_output.name == "grounded_answer"
     assert "超过30分钟" in request.messages[-1].content
 
 

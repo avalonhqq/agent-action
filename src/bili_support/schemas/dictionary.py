@@ -12,6 +12,7 @@ from bili_support.knowledge.dictionary import (
     DictionaryTermStatus,
     DictionaryTermType,
     DictionaryVersionStatus,
+    PublishedDictionaryEntry,
 )
 
 
@@ -138,3 +139,4 @@ class DictionaryArtifactView(DictionaryVersionView):
     """供部署流水线下载的Jieba不可变制品。"""
 
     artifact_content: str
+    entries: tuple[PublishedDictionaryEntry, ...] = ()

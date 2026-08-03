@@ -90,6 +90,25 @@ services:
       - milvus_data:/var/lib/milvus
     restart: unless-stopped
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.2
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health >/dev/null || exit 1"]
+      interval: 10s
+      start_period: 60s
+      timeout: 5s
+      retries: 20
+    mem_limit: 3g
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -109,6 +128,11 @@ services:
       BILI_SUPPORT_MILVUS_URI: http://milvus:19530
       BILI_SUPPORT_MILVUS_TOKEN: root:Milvus
       BILI_SUPPORT_MILVUS_COLLECTION: bili_support_child_v2
+      BILI_SUPPORT_ELASTICSEARCH_ENABLED: "true"
+      BILI_SUPPORT_ELASTICSEARCH_REQUIRED: "true"
+      BILI_SUPPORT_ELASTICSEARCH_URL: http://elasticsearch:9200
+      BILI_SUPPORT_ELASTICSEARCH_INDEX_PREFIX: bili-support-child
+      BILI_SUPPORT_ELASTICSEARCH_READ_ALIAS: bili-support-child-read
       BILI_SUPPORT_API_TOKEN: local-demo-token
       BILI_SUPPORT_UI_PREFILL_DEMO_CREDENTIALS: "true"
       BILI_SUPPORT_UI_STORAGE_SECRET: local-compose-ui-secret
@@ -118,6 +142,8 @@ services:
       redis:
         condition: service_healthy
       milvus:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     ports:
       - "8010:8010"
@@ -129,3 +155,4 @@ volumes:
   milvus_etcd_data:
   milvus_minio_data:
   milvus_data:
+  elasticsearch_data:

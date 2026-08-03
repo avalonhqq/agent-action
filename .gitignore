@@ -17,6 +17,7 @@ data/*.db-*
 data/knowledge/*
 data/fixtures/*
 data/evaluation/*
+data/models/*
 !data/knowledge/.gitkeep
 !data/fixtures/.gitkeep
 !data/evaluation/.gitkeep
@@ -45,5 +46,11 @@ data/evaluation/*
 !data/evaluation/retrieval_policy_bigram_report_v2.json
 !data/evaluation/retrieval_policy_jieba_report_v2.md
 !data/evaluation/retrieval_policy_jieba_report_v2.json
+!data/evaluation/rag_dev_v1.jsonl
+!data/evaluation/rag_replay_report_v1.md
+!data/evaluation/rag_replay_report_v1.json
+!data/evaluation/claim_verification_dev_v1.jsonl
+!data/evaluation/claim_verification_report_v1.md
+!data/models/.gitkeep
 .obsidian/*
 .idea/

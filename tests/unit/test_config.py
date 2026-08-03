@@ -47,6 +47,7 @@ def test_default_settings() -> None:
     assert settings.log_level.value == "INFO"
     assert settings.llm_provider is LLMProviderKind.MOCK
     assert settings.llm_temperature == 0.0
+    assert settings.grounded_parse_retries == 1
     assert settings.embedding_provider is EmbeddingProviderKind.MOCK
     assert settings.embedding_dimension == 128
     assert settings.milvus_collection == "bili_support_child_v2"
@@ -59,6 +60,7 @@ def test_llm_environment_values_are_typed(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("BILI_SUPPORT_LLM_MAX_RETRIES", "3")
     monkeypatch.setenv("BILI_SUPPORT_LLM_TEMPERATURE", "0.2")
     monkeypatch.setenv("BILI_SUPPORT_LLM_STRUCTURED_OUTPUT_MODE", "json_object")
+    monkeypatch.setenv("BILI_SUPPORT_GROUNDED_PARSE_RETRIES", "2")
     reset_settings()
 
     settings = get_settings()
@@ -67,6 +69,7 @@ def test_llm_environment_values_are_typed(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.llm_max_retries == 3
     assert settings.llm_temperature == 0.2
     assert settings.llm_structured_output_mode is LLMStructuredOutputMode.JSON_OBJECT
+    assert settings.grounded_parse_retries == 2
 
 
 def test_redis_required_needs_redis_enabled() -> None:
@@ -81,6 +84,24 @@ def test_milvus_required_needs_milvus_enabled() -> None:
         Settings(_env_file=None, milvus_required=True, milvus_enabled=False)
 
     assert "milvus_required" in str(exc_info.value)
+
+
+def test_elasticsearch_required_needs_elasticsearch_enabled() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            _env_file=None,
+            elasticsearch_required=True,
+            elasticsearch_enabled=False,
+        )
+
+    assert "elasticsearch_required" in str(exc_info.value)
+
+
+def test_elasticsearch_credentials_must_be_configured_as_pair() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, elasticsearch_username="elastic")
+
+    assert "elasticsearch_password" in str(exc_info.value)
 
 
 def test_production_cannot_prefill_demo_credentials() -> None:

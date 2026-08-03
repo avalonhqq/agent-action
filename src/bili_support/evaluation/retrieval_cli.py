@@ -73,7 +73,10 @@ async def run_cli(arguments: argparse.Namespace) -> int:
         if arguments.bm25_tokenizer is not None:
             settings = settings.model_copy(
                 update={
-                    "bm25_tokenizer": BM25TokenizerKind(arguments.bm25_tokenizer)
+                    "bm25_tokenizer": BM25TokenizerKind(arguments.bm25_tokenizer),
+                    # 显式Tokenizer参数用于回放旧进程内基线；ES使用自己的Analyzer。
+                    "elasticsearch_enabled": False,
+                    "elasticsearch_required": False,
                 }
             )
         application = create_app(settings)
@@ -95,7 +98,16 @@ async def run_cli(arguments: argparse.Namespace) -> int:
                 rerank_provider=settings.rerank_provider.value,
                 rerank_model=settings.rerank_model,
                 rerank_candidate_k=arguments.rerank_candidate_k,
-                bm25_tokenizer=settings.bm25_tokenizer,
+                bm25_tokenizer=(
+                    None
+                    if settings.elasticsearch_enabled
+                    else settings.bm25_tokenizer
+                ),
+                lexical_backend=(
+                    "elasticsearch"
+                    if settings.elasticsearch_enabled
+                    else "in_memory"
+                ),
             ).evaluate(
                 dataset_name=arguments.dataset.name,
                 cases=cases,

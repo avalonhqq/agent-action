@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from bili_support.intent.types import BusinessDomain
+from bili_support.knowledge.claim_verification import GroundedVerificationResult
 from bili_support.knowledge.coverage import EvidenceCoverage
 from bili_support.knowledge.reranking import RerankTrace
 from bili_support.knowledge.retrieval import RetrievalMode, RetrievalSource
@@ -16,7 +17,7 @@ from bili_support.schemas.knowledge import KnowledgeRetrievalView
 
 
 class KnowledgeCitation(BaseModel):
-    """返回给页面的证据来源，不包含内部存储路径或向量。"""
+    """可定位的公开证据来源，不包含内部存储路径、向量或Loader私有信息。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -27,6 +28,10 @@ class KnowledgeCitation(BaseModel):
     document_version_id: str
     business_domain: BusinessDomain
     score: float
+    heading_path: tuple[str, ...] = ()
+    page_numbers: tuple[int, ...] = ()
+    section_title: str | None = None
+    excerpt: str = ""
 
 
 class KnowledgeRetrievalTrace(BaseModel):
@@ -44,6 +49,9 @@ class KnowledgeRetrievalTrace(BaseModel):
     reranking: RerankTrace | None = None
     policy: RetrievalPolicyTrace | None = None
     coverage: EvidenceCoverage | None = None
+    used_evidence_ids: tuple[str, ...] = ()
+    verification: GroundedVerificationResult | None = None
+    grounding_error_code: str | None = None
     error_code: str | None = None
 
 
@@ -87,6 +95,8 @@ def build_knowledge_evidence(
             seen_parent_ids.add(parent_id)
             used_chars += len(content)
             evidence_id = f"E{len(citations) + 1}"
+            heading_path = _string_tuple(item.parent.metadata_json.get("heading_path"))
+            page_numbers = _page_numbers(item.parent.metadata_json)
             citation = KnowledgeCitation(
                 evidence_id=evidence_id,
                 parent_chunk_id=parent_id,
@@ -95,6 +105,10 @@ def build_knowledge_evidence(
                 document_version_id=item.document_version_id,
                 business_domain=domain,
                 score=item.best_child_score,
+                heading_path=heading_path,
+                page_numbers=page_numbers,
+                section_title=heading_path[-1] if heading_path else None,
+                excerpt=_excerpt(content),
             )
             citations.append(citation)
             evidence_rows.append(
@@ -164,3 +178,26 @@ def build_knowledge_evidence(
         ),
         trace=trace,
     )
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    """把不可信metadata中的标题路径收敛为可公开字符串。"""
+
+    if not isinstance(value, list):
+        return ()
+    return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
+
+
+def _page_numbers(metadata: dict[str, object]) -> tuple[int, ...]:
+    """兼容单页和跨页Parent，并保持页码唯一且有序。"""
+
+    raw = metadata.get("page_numbers")
+    values = raw if isinstance(raw, list) else [metadata.get("page_number")]
+    return tuple(dict.fromkeys(item for item in values if isinstance(item, int) and item > 0))
+
+
+def _excerpt(content: str, limit: int = 180) -> str:
+    """生成确定性原文摘要；不让模型改写引用内容。"""
+
+    compact = " ".join(content.split())
+    return compact if len(compact) <= limit else compact[: limit - 1].rstrip() + "…"

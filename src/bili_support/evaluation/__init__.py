@@ -20,6 +20,12 @@ from bili_support.evaluation.intent_types import (
     IntentEvaluationCase,
     IntentEvaluationReport,
 )
+from bili_support.evaluation.rag_data import RagDatasetError, load_rag_evaluation_cases
+from bili_support.evaluation.rag_runner import ReplayRagEvaluator, score_rag_case
+from bili_support.evaluation.rag_types import (
+    RagEvaluationCase,
+    RagEvaluationReport,
+)
 
 __all__ = [
     "ChunkDatasetError",
@@ -32,6 +38,12 @@ __all__ = [
     "IntentDatasetError",
     "IntentEvaluationCase",
     "IntentEvaluationReport",
+    "RagDatasetError",
+    "RagEvaluationCase",
+    "RagEvaluationReport",
+    "ReplayRagEvaluator",
     "load_intent_evaluation_cases",
     "load_chunk_evaluation_cases",
+    "load_rag_evaluation_cases",
+    "score_rag_case",
 ]

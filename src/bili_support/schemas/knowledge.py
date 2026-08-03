@@ -48,6 +48,7 @@ class KnowledgeVersionView(BaseModel):
     media_type: str  # 上传时识别的MIME类型
     size_bytes: int  # 原始文件字节数
     status: str  # pending/ready/failed
+    is_current: bool  # 当前逻辑文档实际参与检索的内容版本
     created_at: datetime  # 版本创建时间；内容本身之后不原地修改
 
 

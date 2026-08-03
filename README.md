@@ -6,7 +6,7 @@
 
 ## 项目状态
 
-前五周已经完成，第六周 Embedding 与 Milvus 向量检索已启动：项目具备工程基线、
+前七周已经完成，Milvus 向量检索与 Elasticsearch BM25 已接入：项目具备工程基线、
 可替换的 LLM 调用链路、可持久化的多用户客服会话，以及可追溯、可版本化的文档解析能力。
 
 - 已建立标准 `src/bili_support` 工程骨架。
@@ -15,8 +15,8 @@
 - 已实现 LLM 内部契约、确定性 Mock、OpenAI-compatible 适配器、Prompt 版本、结构化输出、上下文控制、Chat API、SSE 和安全用量记录。
 - 已实现 SQLAlchemy 2 异步数据层、Alembic 迁移、用户/会话/消息/模型调用、简单鉴权、持久化 SSE 和 NiceGUI 页面。
 - 已实现 PDF、DOCX、Markdown、TXT 统一 Loader、SHA-256 幂等、文档版本、解析任务和结构块持久化。
-- 已实现 `EmbeddingProvider`、确定性 Hash Mock、Milvus `VectorStore` 边界和 HNSW/COSINE Collection。
-- RAG 检索、Agent 和业务工具会按周逐步实现。
+- 已实现 `EmbeddingProvider`、Milvus HNSW/COSINE、Elasticsearch 中文BM25、RRF和可降级检索。
+- Agent、业务工具与证据校验会按周逐步实现。
 - 课程采用“大模型核心学习 + 工程底座自动完成”模式：重点讲解并实验 Prompt、RAG、意图、Agent、安全和评估；CRUD、迁移、鉴权、页面与部署由 Codex 自动实现并通过门禁。
 
 ## 最终能力
@@ -27,7 +27,7 @@
 - Small-to-Big、标准问、中文 BM25、向量检索、RRF、批量 Reranker 和多实体覆盖。
 - LangGraph 确定性多 Agent 和复合意图处理。
 - 会员、订单、稿件、处罚等受控 Mock 业务工具。
-- Verification 事实校验、PII 脱敏、权限和 Prompt Injection 防护。
+- 本地中文NLI Claim Verification、PII 脱敏、权限和 Prompt Injection 防护。
 - 低置信度、高风险问题转入 Mock 人工技能组。
 - 离线评估、OpenTelemetry、Docker Compose 和完整演示材料。
 
@@ -38,7 +38,7 @@
 ```text
 agent-action/
 ├── Dockerfile                # 非 root 容器运行基线
-├── compose.yaml              # API、MySQL、Redis、Milvus 服务编排
+├── compose.yaml              # API、MySQL、Redis、Milvus、Elasticsearch 编排
 ├── alembic.ini               # 数据库迁移配置
 ├── migrations/               # 可追踪 Schema 迁移
 ├── pyproject.toml             # 项目元数据、依赖和质量工具配置
@@ -78,7 +78,8 @@ agent-action/
 - Windows 10/11、Linux 或 macOS。
 - Python 3.12 或更高版本。
 - Git，可选但推荐。
-- 默认 SQLite/Mock 模式不要求 MySQL、Redis、Milvus 或模型 API Key；启用完整知识检索时需要 Milvus。
+- 默认 SQLite/Mock 模式不要求外部服务；启用完整Hybrid知识检索时需要MySQL、Milvus和Elasticsearch。
+- Claim语义校验默认使用本地`mDeBERTa-v3-base-mnli-xnli`真实模型；首次问答会下载模型，生产部署应预下载并设置`BILI_SUPPORT_CLAIM_VERIFICATION_LOCAL_FILES_ONLY=true`。
 - 使用容器启动时需要 Docker Desktop 或 Docker Engine。
 
 检查 Python：
@@ -141,6 +142,14 @@ python -m pip install --upgrade pip
 ```powershell
 python -m pip install -e ".[dev]"
 ```
+
+有NVIDIA显卡的Windows机器建议安装官方CUDA Torch wheel（版本应与`pyproject.toml`约束一致）：
+
+```powershell
+python -m pip install --force-reinstall --no-deps torch==2.13.0+cu130 --index-url https://download.pytorch.org/whl/cu130
+```
+
+安装后用`python -c "import torch; print(torch.cuda.is_available())"`确认；输出`False`时仍可使用CPU真实推理，但并发容量较低。
 
 `-e` 表示 editable 安装，修改 `src/bili_support` 后无需重复安装。
 
@@ -236,15 +245,60 @@ Compose 内的 API 使用 `http://milvus:19530`。默认 Collection 为
 `bili_support_child_v2`，其向量维度必须和 Embedding 模型一致。更换模型或维度时应创建
 新 Collection，不要复用不兼容的旧 Schema。
 
+## Windows + WSL2 启动 Elasticsearch
+
+Elasticsearch负责生产运行时的中文BM25词法召回，Milvus仍负责向量召回。当前本地实例绑定
+`127.0.0.1:9200`且关闭安全认证，只允许开发机使用；生产环境必须开启TLS、账号认证和网络隔离。
+
+```powershell
+cd C:\workspace\agent-action
+wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/workspace/agent-action && docker compose up -d elasticsearch"
+Invoke-RestMethod http://127.0.0.1:9200
+```
+
+启用应用侧ES检索：
+
+```dotenv
+BILI_SUPPORT_ELASTICSEARCH_ENABLED=true
+BILI_SUPPORT_ELASTICSEARCH_REQUIRED=true
+BILI_SUPPORT_ELASTICSEARCH_URL=http://127.0.0.1:9200
+BILI_SUPPORT_ELASTICSEARCH_INDEX_PREFIX=bili-support-child
+BILI_SUPPORT_ELASTICSEARCH_READ_ALIAS=bili-support-child-read
+```
+
+首次接入或需要人工修复时执行全量同步：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.knowledge.lexical_sync_cli
+# 或安装项目后使用：bili-lexical-sync
+```
+
+同步读取MySQL中`document active + version current + index active`的Child，并把active领域词典匹配结果写入`domain_terms`。物理索引名包含
+快照generation；全部Bulk写入和Refresh成功后，才原子切换`bili-support-child-read`别名。相同generation
+重复执行直接复用，失败则保留旧别名。以下事件会自动触发全量同步：
+
+- 应用启动，用于修复停机期间产生的漂移。
+- 新知识索引成功激活。
+- 新领域词典版本发布并激活。
+- 逻辑知识文档被软删除。
+
+查看当前数据：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:9200/_alias/bili-support-child-read
+Invoke-RestMethod http://127.0.0.1:9200/bili-support-child-read/_count
+```
+
 ### 存储职责
 
 - MySQL：文档、版本、权限、Chunk 正文、索引任务的事实来源。
 - Milvus：Child Chunk 向量与检索过滤所需的少量冗余元数据。
+- Elasticsearch：活动Child的中文BM25副本和领域词命中；可删除重建，不是事实来源。
 - MinIO：Milvus 内部对象数据；不是客服知识正文的事实来源。
 - etcd：Milvus 内部元数据协调。
 
-因此“换成 Milvus”只替换向量索引层，不替换 MySQL。命中 Milvus 后仍需回 MySQL做权限复核、
-版本校验和 Small-to-Big Parent 还原。
+因此Milvus和Elasticsearch都只是可重建索引，不替换MySQL。任一通道命中后仍需回MySQL做权限复核、
+活动版本校验和Small-to-Big Parent还原。
 
 ### 构建知识版本向量索引
 
@@ -269,8 +323,9 @@ Invoke-RestMethod -Method Post `
 - `POST /api/v1/knowledge/index-jobs/{job_id}/retry`：重试失败构建。
 - `POST /api/v1/knowledge/retrieve`：独立调试Vector、BM25或Hybrid RRF召回和Parent还原。
 
-每条Milvus记录包含 `index_version_id`。新版本全部写完后，MySQL在一个事务中把旧活动版本标记为
-`superseded`、把新版本标记为`active`；失败和构建中的向量不会进入后续检索。
+每条Milvus记录保留`index_version_id`作内部身份。新版本全部写完后，MySQL在一个事务中把旧索引标记为
+`superseded`、新索引标记为`active`，并原子切换`KnowledgeDocumentVersion.is_current`。查询方不传版本号；
+版本身份只用于服务端白名单、二次复核、引用和审计，失败和构建中的向量不会进入后续检索。
 
 检索示例：
 
@@ -548,6 +603,33 @@ data/evaluation/retrieval_hybrid_rerank_mock_report_v1.json
 报告包含Recall@1/3/5、MRR@5、负例准确率、执行失败率、P50/P95及可定位失败样本。首版
 Golden Dataset使用“可选文档标题+Parent正文锚点”定位相关知识，不依赖重新导入后会变化的UUID。
 
+### 第8周Grounded Answer与RAG生成评估
+
+知识Chat使用`grounded_support:v4`输出严格JSON；v3保留DeepSeek完整JSON形状和受限结构重试，v4进一步要求每条Claim选择最小、最直接的支持证据，随后依次校验引用集合、当前请求证据白名单和逐Claim支持度。
+只有验证结果为`pass`才展示模型答案；`degrade`、`reject`或结构错误统一返回确定性安全文案。页面分别展示
+候选证据、实际引用、Word/Markdown章节、PDF页码、Parent原文摘要和声明校验摘要。
+
+运行固定预测重放：
+
+```powershell
+bili-rag-eval
+```
+
+或者：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.evaluation.rag_cli
+```
+
+默认输出：
+
+```text
+data/evaluation/rag_replay_report_v1.md
+data/evaluation/rag_replay_report_v1.json
+```
+
+`fixed_prediction_replay`只验收数据、校验器、指标和报告链路，不代表真实模型效果。
+
 ## 可选：接入 OpenAI-compatible 服务
 
 编辑本地 `.env`，不要提交真实密钥：
@@ -584,6 +666,19 @@ http://127.0.0.1:8010/support/
 MySQL `knowledge_dictionary_terms`；审核和发布页面分别更新审核字段并创建
 `knowledge_dictionary_versions`不可变快照。
 
+首次初始化领域词候选，可执行幂等导入命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m bili_support.knowledge.dictionary_seed
+```
+
+默认词表位于`data/fixtures/dictionary_terms_v1.json`，包含8个业务域、48个规范词及其别名。
+导入只创建`candidate`，必须在“审核发布”页人工审核后才能进入发布制品；重复执行会跳过已有词。
+
+发布版本同时保存Jieba文本和规范词/别名JSON快照。发布成功后制品会原子同步到
+`BILI_SUPPORT_BM25_USER_DICTIONARY_PATH`，并自动重建Elasticsearch活动Child索引的`domain_terms`。
+进程内Jieba/BM25继续作为离线对照和无ES测试后端；补检索实体覆盖只读取active版本快照。
+
 在“请输入客服问题”中输入内容，点击“识别意图”，页面会展示顶层路由、子意图、实体、情绪、
 风险、置信度、来源和澄清问题。意图识别不会创建会话或写入消息；需要正式客服回答时再点击
 “发送并流式回答”。
@@ -617,7 +712,7 @@ BILI_SUPPORT_INTENT_PROMPT_VERSION=3
 正式发送消息也会经过同一个 `hybrid_v3` 实例。客服路由当前包括 `safety`、
 `out_of_scope`、`clarification`、`human_review_mock`、`human_service_mock`、
 `general_chat` 和 `knowledge_rag`。普通低风险业务问题会按意图业务域调用真实
-`KnowledgeRetrievalService`，经过Milvus/BM25召回、MySQL复核和Small-to-Big后，将有界Parent
+`KnowledgeRetrievalService`，经过Milvus/Elasticsearch BM25召回、MySQL复核和Small-to-Big后，将有界Parent
 证据交给`grounded_support:v1`回答。页面展示检索模式、证据数量和实际来源；无证据或检索故障时
 不会回退到自由模型。人工坐席仍是Mock；不安全、领域外、澄清和高风险请求使用确定性回复。
 流式接口会在文本前发送包含检索Trace的`event: route`。
@@ -641,7 +736,8 @@ BILI_SUPPORT_CUSTOMER_RERANK_ENABLED=false
 每一路的原始排名与分数；单路故障时明确标记降级。权限范围由服务端身份生成，Chat请求体不能
 自报`allowed_scopes`。
 
-BM25默认使用Jieba搜索模式和项目内的哔哩哔哩业务词典；`bigram`继续作为确定性对照基线。
+启用Elasticsearch时，BM25使用ES内置CJK analyzer并通过`domain_terms`融合active领域词典；关闭ES时，
+Jieba搜索模式和`bigram`继续作为可重复的进程内对照基线。
 固定集显示Jieba在Hybrid中把Recall@1从75%提升到87.5%、MRR@5从85.42%提升到91.67%。
 分词器变化也会改变RRF分数，因此默认回答门禁已经发布`membership-query-v2`并重新校准阈值。
 
@@ -846,3 +942,6 @@ python -m uvicorn bili_support.main:app --reload --port 8011
 第六周Embedding、Milvus与Small-to-Big检索见[第六周学习与任务记录](doc/week6-learning-record.md)。
 
 第七周BM25、RRF、Rerank与回答门禁见[第七周学习与任务记录](doc/week7-learning-record.md)。
+
+第八周Grounded Answer、Claim Verification、RAG评估与可定位引用见
+[第八周学习与任务记录](doc/week8-learning-record.md)。

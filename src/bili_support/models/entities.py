@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -148,6 +149,11 @@ class KnowledgeDocumentVersion(Base):
         ),
         CheckConstraint("size_bytes > 0", name="size_positive"),
         Index("ix_knowledge_versions_document_created", "document_id", "created_at"),
+        Index(
+            "ix_knowledge_versions_document_current",
+            "document_id",
+            "is_current",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -163,6 +169,8 @@ class KnowledgeDocumentVersion(Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_key: Mapped[str] = mapped_column(String(255), unique=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")
+    # 查询资格由当前状态控制；version_number只用于展示和审计。
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -274,6 +282,8 @@ class KnowledgeDictionaryVersion(Base):
     status: Mapped[str] = mapped_column(String(16), default="active")
     content_sha256: Mapped[str] = mapped_column(String(64), unique=True)
     artifact_content: Mapped[str] = mapped_column(Text)
+    # JSON文本保留规范词与别名分组；Jieba文本本身无法恢复别名属于哪个规范词。
+    manifest_json: Mapped[str] = mapped_column(Text, default="[]")
     term_count: Mapped[int] = mapped_column(Integer)
     published_by_user_id: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),

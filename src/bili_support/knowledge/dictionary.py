@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from bili_support.intent.types import BusinessDomain
 
 
 class DictionaryTermStatus(StrEnum):
@@ -39,6 +44,62 @@ class DictionaryVersionStatus(StrEnum):
 
     ACTIVE = "active"
     SUPERSEDED = "superseded"
+
+
+class PublishedDictionaryEntry(BaseModel):
+    """随发布版本冻结的规范词、别名和运营元数据。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    term: str = Field(min_length=1, max_length=100)
+    aliases: tuple[str, ...] = Field(default=(), max_length=20)
+    business_domain: BusinessDomain
+    term_type: DictionaryTermType
+    frequency: int = Field(ge=1, le=100_000_000)
+
+
+def render_dictionary_manifest(
+    entries: tuple[PublishedDictionaryEntry, ...],
+) -> str:
+    """生成确定性JSON快照，避免运行时读取尚未发布的approved词。"""
+
+    ordered = sorted(
+        entries,
+        key=lambda item: (item.business_domain.value, item.term.casefold()),
+    )
+    return json.dumps(
+        [item.model_dump(mode="json") for item in ordered],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def parse_dictionary_manifest(value: str) -> tuple[PublishedDictionaryEntry, ...]:
+    """读取已发布快照；数据库内容损坏时立即失败，不静默扩大覆盖范围。"""
+
+    raw = json.loads(value)
+    if not isinstance(raw, list):
+        raise ValueError("dictionary manifest must be a JSON list")
+    return tuple(PublishedDictionaryEntry.model_validate(item) for item in raw)
+
+
+def match_published_terms(
+    text: str,
+    entries: tuple[PublishedDictionaryEntry, ...],
+) -> tuple[str, ...]:
+    """把文本中的规范词或别名稳定映射为规范词，供ES精确字段使用。"""
+
+    normalized = text.casefold()
+    matched = [
+        entry.term
+        for entry in entries
+        if any(
+            surface.casefold() in normalized
+            for surface in (entry.term, *entry.aliases)
+        )
+    ]
+    return tuple(dict.fromkeys(matched))
 
 
 def render_jieba_dictionary(

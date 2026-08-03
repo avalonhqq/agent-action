@@ -17,6 +17,7 @@ def render_retrieval_evaluation_markdown(
         f"- 数据集：`{report.dataset}`",
         f"- 样本数：{report.case_count}",
         f"- 检索通道：`{report.retrieval_mode.value}`",
+        f"- 词法检索后端：`{report.lexical_backend}`",
         f"- BM25分词器：`{report.bm25_tokenizer.value if report.bm25_tokenizer else '不适用'}`",
         f"- Embedding 模型：`{report.embedding_model or '不适用'}`",
         f"- Rerank：`{'开启' if report.rerank_enabled else '关闭'}`",

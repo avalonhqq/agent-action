@@ -32,6 +32,7 @@ from bili_support.schemas.knowledge import (
     KnowledgeIndexingView,
     KnowledgeIndexVersionView,
 )
+from bili_support.services.lexical_sync import LexicalIndexSyncService
 
 
 class KnowledgeIndexingService:
@@ -54,6 +55,7 @@ class KnowledgeIndexingService:
             embedding_timeout_seconds: float,
             collection_name: str,
             chunk_schema_version: str,
+            lexical_sync_service: LexicalIndexSyncService | None = None,
     ) -> None:
         self._database = database
         self._embedding_provider = embedding_provider
@@ -65,6 +67,7 @@ class KnowledgeIndexingService:
         self._embedding_timeout_seconds = embedding_timeout_seconds
         self._collection_name = collection_name
         self._chunk_schema_version = chunk_schema_version
+        self._lexical_sync_service = lexical_sync_service
 
     async def build(
             self,
@@ -231,6 +234,9 @@ class KnowledgeIndexingService:
                 vector_store=vector_store,
             )
             await self._activate(job_id)
+            if self._lexical_sync_service is not None:
+                # ES同步失败保留旧Alias；向量索引成功状态不被可降级词法副本反向污染。
+                await self._lexical_sync_service.synchronize("knowledge_index_activate")
         except Exception as exc:
             error_code = self._error_code(exc)
             await self._mark_failed(job_id=job_id, error_code=error_code)
@@ -386,6 +392,11 @@ class KnowledgeIndexingService:
                 document_id=version.document_id,
                 except_index_version_id=index_version.id,
                 finished_at=now,
+            )
+            # 用户查询不传版本号；当前内容版本随索引激活在同一事务中切换。
+            await repository.switch_current_document_version(
+                document_id=version.document_id,
+                current_version_id=version.id,
             )
             index_version.status = "active"
             index_version.activated_at = now

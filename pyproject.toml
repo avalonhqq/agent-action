@@ -13,6 +13,7 @@ dependencies = [
   "aiosqlite>=0.22,<1.0",
   "alembic>=1.17,<2.0",
   "cryptography>=45,<47",
+  "elasticsearch[async]>=9.4,<10.0",
   "fastapi>=0.121,<1.0",
   "httpx>=0.28,<1.0",
   "jieba>=0.42.1,<1.0",
@@ -26,6 +27,9 @@ dependencies = [
   "redis>=7.0,<8.0",
   "sqlalchemy[asyncio]>=2.0.44,<3.0",
   "structlog>=25,<27",
+  "sentencepiece>=0.2,<1.0",
+  "torch>=2.13,<2.14",
+  "transformers>=5.14,<6.0",
   "uvicorn[standard]>=0.38,<1.0",
 ]
 
@@ -44,6 +48,10 @@ bili-intent-eval = "bili_support.evaluation.intent_cli:main"
 bili-chunk-eval = "bili_support.evaluation.chunk_cli:main"
 bili-retrieval-eval = "bili_support.evaluation.retrieval_cli:main"
 bili-policy-eval = "bili_support.evaluation.policy_cli:main"
+bili-rag-eval = "bili_support.evaluation.rag_cli:main"
+bili-claim-verifier-eval = "bili_support.evaluation.claim_verifier_cli:main"
+bili-dictionary-seed = "bili_support.knowledge.dictionary_seed:main"
+bili-lexical-sync = "bili_support.knowledge.lexical_sync_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bili_support"]

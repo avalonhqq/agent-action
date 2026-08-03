@@ -12,8 +12,10 @@ from bili_support.knowledge.bm25 import (
     BM25Document,
     BM25Index,
 )
+from bili_support.knowledge.dictionary import match_published_terms
 from bili_support.knowledge.embedding import EmbeddingProvider, EmbeddingRequest
 from bili_support.knowledge.fusion import ReciprocalRankFusion
+from bili_support.knowledge.lexical_store import LexicalSearchQuery, LexicalStore
 from bili_support.knowledge.reranking import (
     RerankDocument,
     RerankErrorCode,
@@ -50,6 +52,7 @@ from bili_support.schemas.knowledge import (
     RetrievalChildHitView,
     RetrievalParentView,
 )
+from bili_support.services.dictionary import KnowledgeDictionaryService
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +80,8 @@ class KnowledgeRetrievalService:
         rewriter: StandaloneQueryRewriter | None = None,
         small_to_big: SmallToBigExpander | None = None,
         bm25_tokenizer: SearchTokenizer | None = None,
+        lexical_store: LexicalStore | None = None,
+        dictionary_service: KnowledgeDictionaryService | None = None,
         fusion: ReciprocalRankFusion | None = None,
         rerank_provider: RerankProvider | None = None,
         rerank_model: str = "mock-reranker-v1",
@@ -99,6 +104,8 @@ class KnowledgeRetrievalService:
         self._rewriter = rewriter or StandaloneQueryRewriter()
         self._small_to_big = small_to_big or SmallToBigExpander()
         self._bm25_tokenizer = bm25_tokenizer or BigramSearchTokenizer()
+        self._lexical_store = lexical_store
+        self._dictionary_service = dictionary_service
         self._fusion = fusion or ReciprocalRankFusion()
         self._rerank_provider = rerank_provider
         self._rerank_model = rerank_model
@@ -173,6 +180,8 @@ class KnowledgeRetrievalService:
             raw_hits = await self._bm25_recall(
                 query=rewrite.standalone_query,
                 targets=targets,
+                business_domain=request.business_domain.value,
+                allowed_scopes=request.allowed_scopes,
                 top_k=recall_top_k,
             )
         else:
@@ -187,6 +196,8 @@ class KnowledgeRetrievalService:
                 self._safe_bm25_recall(
                     query=rewrite.standalone_query,
                     targets=targets,
+                    business_domain=request.business_domain.value,
+                    allowed_scopes=request.allowed_scopes,
                     top_k=recall_top_k,
                 ),
             )
@@ -305,14 +316,46 @@ class KnowledgeRetrievalService:
         *,
         query: str,
         targets: list[ActiveKnowledgeIndex],
+        business_domain: str,
+        allowed_scopes: tuple[str, ...],
         top_k: int,
     ) -> tuple[ChildRetrievalCandidate, ...]:
         """执行单次中文BM25召回；不需要Embedding或Milvus。"""
 
         if not targets:
             return ()
-        bm25_index = await self._bm25_index(targets)
-        return bm25_index.search(query=query, top_k=top_k)
+        if self._lexical_store is None:
+            bm25_index = await self._bm25_index(targets)
+            return bm25_index.search(query=query, top_k=top_k)
+        entries = (
+            await self._dictionary_service.active_entries(
+                business_domain=business_domain,
+            )
+            if self._dictionary_service is not None
+            else ()
+        )
+        hits = await self._lexical_store.search(
+            LexicalSearchQuery(
+                text=query,
+                top_k=top_k,
+                # targets由MySQL按当前actor过滤，ES用owner继续隔离租户但不按版本号查询。
+                owner_user_id=targets[0].document.created_by_user_id,
+                business_domain=business_domain,
+                allowed_scopes=allowed_scopes,
+                domain_terms=match_published_terms(query, entries),
+            )
+        )
+        return tuple(
+            ChildRetrievalCandidate(
+                chunk_id=item.chunk_id,
+                document_id=item.document_id,
+                version_id=item.version_id,
+                index_version_id=item.index_version_id,
+                source=RetrievalSource.BM25,
+                score=item.score,
+            )
+            for item in hits
+        )
 
     async def _safe_vector_recall(
         self,
@@ -344,6 +387,8 @@ class KnowledgeRetrievalService:
         *,
         query: str,
         targets: list[ActiveKnowledgeIndex],
+        business_domain: str,
+        allowed_scopes: tuple[str, ...],
         top_k: int,
     ) -> _RecallOutcome:
         """Hybrid边界：BM25故障转成可审计降级，不泄露内部异常。"""
@@ -352,6 +397,8 @@ class KnowledgeRetrievalService:
             hits = await self._bm25_recall(
                 query=query,
                 targets=targets,
+                business_domain=business_domain,
+                allowed_scopes=allowed_scopes,
                 top_k=top_k,
             )
         except asyncio.CancelledError:
@@ -506,8 +553,15 @@ class KnowledgeRetrievalService:
     ) -> BM25Index:
         """按活动索引集合缓存不可变Child语料，避免每次请求重复计算词频。"""
 
-        cache_key = tuple(
-            sorted(target.index_version.id for target in targets)
+        # 词典版本进入缓存key；发布后Jieba热加载会触发Child文档词频整体重建。
+        tokenizer_version = getattr(
+            self._bm25_tokenizer,
+            "cache_version",
+            "external-static-v1",
+        )
+        cache_key = (
+            *sorted(target.index_version.id for target in targets),
+            f"tokenizer:{tokenizer_version}",
         )
         cached = self._bm25_indexes.get(cache_key)
         if cached is not None:

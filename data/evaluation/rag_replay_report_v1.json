@@ -1,0 +1,75 @@
+{
+  "dataset": "rag_dev_v1.jsonl",
+  "run_mode": "fixed_prediction_replay",
+  "metrics": {
+    "decision_accuracy": 1.0,
+    "faithfulness": 1.0,
+    "answer_relevancy": 1.0,
+    "citation_precision": 1.0,
+    "citation_recall": 1.0,
+    "pass_rate": 1.0,
+    "case_count": 6
+  },
+  "cases": [
+    {
+      "case_id": "membership_activation",
+      "expected_decision": "answer",
+      "actual_decision": "answer",
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "failures": []
+    },
+    {
+      "case_id": "membership_multi_entity",
+      "expected_decision": "answer",
+      "actual_decision": "answer",
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "failures": []
+    },
+    {
+      "case_id": "missing_account_clarify",
+      "expected_decision": "clarify",
+      "actual_decision": "clarify",
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "failures": []
+    },
+    {
+      "case_id": "no_evidence_refuse",
+      "expected_decision": "refuse",
+      "actual_decision": "refuse",
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "failures": []
+    },
+    {
+      "case_id": "conflicting_refund_rules",
+      "expected_decision": "refuse",
+      "actual_decision": "refuse",
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "failures": []
+    },
+    {
+      "case_id": "document_prompt_injection",
+      "expected_decision": "answer",
+      "actual_decision": "answer",
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "failures": []
+    }
+  ]
+}

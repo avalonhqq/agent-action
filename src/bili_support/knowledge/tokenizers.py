@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable
 from enum import StrEnum
 from pathlib import Path
+from threading import RLock
 from typing import Protocol
 
 import jieba  # type: ignore[import-untyped]
@@ -55,6 +56,10 @@ class SearchTokenizer(Protocol):
     def tokenize(self, text: str) -> tuple[str, ...]:
         """把查询或Child正文转成有序、可重复的搜索Token。"""
 
+    @property
+    def cache_version(self) -> str:
+        """影响BM25文档词频缓存的词典版本标识。"""
+
 
 class BigramSearchTokenizer:
     """领域词与字符二元组结合的7A确定性分词基线。"""
@@ -83,6 +88,10 @@ class BigramSearchTokenizer:
                 )
         return tuple(tokens)
 
+    @property
+    def cache_version(self) -> str:
+        return "bigram-static-v1"
+
 
 class JiebaSearchTokenizer:
     """使用Jieba搜索模式，并加载受控业务词典的中文分词器。
@@ -98,19 +107,22 @@ class JiebaSearchTokenizer:
         user_dictionary_path: str | Path | None = None,
         hmm_enabled: bool = False,
     ) -> None:
-        self._tokenizer = jieba.Tokenizer()
+        self._domain_terms = _normalize_domain_terms(domain_terms)
         self._hmm_enabled = hmm_enabled
-        for term in _normalize_domain_terms(domain_terms):
-            self._tokenizer.add_word(term)
+        self._user_dictionary_path: Path | None = None
         if user_dictionary_path is not None:
             path = _resolve_user_dictionary_path(user_dictionary_path)
             if not path.is_file():
                 raise ValueError(f"BM25 Jieba user dictionary does not exist: {path}")
-            self._tokenizer.load_userdict(str(path))
+            self._user_dictionary_path = path
+        self._lock = RLock()
+        self._dictionary_signature = self._current_signature()
+        self._tokenizer = self._build_tokenizer()
 
     def tokenize(self, text: str) -> tuple[str, ...]:
         """英文数字保持完整，中文使用适合倒排索引的搜索模式。"""
 
+        self._reload_if_changed()
         tokens: list[str] = []
         for span in _TOKEN_PATTERN.findall(text.casefold()):
             if span.isascii():
@@ -125,6 +137,39 @@ class JiebaSearchTokenizer:
                 if token.strip()
             )
         return tuple(tokens)
+
+    @property
+    def cache_version(self) -> str:
+        """文件原子替换后先热加载，再让BM25以新key重建文档词频。"""
+
+        self._reload_if_changed()
+        return f"jieba:{self._dictionary_signature}"
+
+    def _build_tokenizer(self) -> jieba.Tokenizer:
+        tokenizer = jieba.Tokenizer()
+        for term in self._domain_terms:
+            tokenizer.add_word(term)
+        if self._user_dictionary_path is not None:
+            tokenizer.load_userdict(str(self._user_dictionary_path))
+        return tokenizer
+
+    def _current_signature(self) -> str:
+        if self._user_dictionary_path is None:
+            return "builtin-v1"
+        stat = self._user_dictionary_path.stat()
+        return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+    def _reload_if_changed(self) -> None:
+        signature = self._current_signature()
+        if signature == self._dictionary_signature:
+            return
+        with self._lock:
+            signature = self._current_signature()
+            if signature == self._dictionary_signature:
+                return
+            tokenizer = self._build_tokenizer()
+            self._tokenizer = tokenizer
+            self._dictionary_signature = signature
 
 
 def create_search_tokenizer(
