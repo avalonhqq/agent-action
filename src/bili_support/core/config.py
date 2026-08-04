@@ -110,6 +110,18 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/bili_support.db"
     database_echo: bool = False
     database_auto_create: bool = True
+    # LangGraph运行状态独立于MySQL业务事实；启用后写入MongoDB Replica Set。
+    graph_checkpoint_enabled: bool = False
+    graph_checkpoint_required: bool = False
+    graph_checkpoint_mongodb_uri: SecretStr = SecretStr(
+        "mongodb://127.0.0.1:27017/?directConnection=true&replicaSet=rs0"
+    )
+    graph_checkpoint_database: str = "bili_support_graph"
+    graph_checkpoint_collection: str = "checkpoints"
+    graph_checkpoint_writes_collection: str = "checkpoint_writes"
+    graph_checkpoint_ttl_seconds: int = Field(default=604800, ge=300, le=7776000)
+    graph_checkpoint_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+    graph_checkpoint_encryption_key: SecretStr | None = None
     redis_enabled: bool = False
     redis_required: bool = False
     redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
@@ -187,6 +199,9 @@ class Settings(BaseSettings):
         "llm_mock_response",
         "intent_mock_response",
         "database_url",
+        "graph_checkpoint_database",
+        "graph_checkpoint_collection",
+        "graph_checkpoint_writes_collection",
         "knowledge_storage_dir",
         "embedding_model",
         "knowledge_index_chunk_schema_version",
@@ -214,6 +229,30 @@ class Settings(BaseSettings):
             raise ValueError("ui_prefill_demo_credentials must be False in production")
         if self.redis_required and not self.redis_enabled:
             raise ValueError("redis_required needs redis_enabled=True")
+        if self.graph_checkpoint_required and not self.graph_checkpoint_enabled:
+            raise ValueError(
+                "graph_checkpoint_required needs graph_checkpoint_enabled=True"
+            )
+        checkpoint_key = (
+            self.graph_checkpoint_encryption_key.get_secret_value()
+            if self.graph_checkpoint_encryption_key is not None
+            else ""
+        )
+        if checkpoint_key and len(checkpoint_key.encode()) not in (16, 24, 32):
+            raise ValueError(
+                "graph_checkpoint_encryption_key must be 16, 24, or 32 bytes"
+            )
+        if (
+            self.environment == Environment.PRODUCTION
+            and self.graph_checkpoint_enabled
+            and (
+                not checkpoint_key
+                or checkpoint_key == "local-dev-checkpoint-key-32-byte"
+            )
+        ):
+            raise ValueError(
+                "production graph checkpoints require a non-development encryption key"
+            )
         if self.milvus_required and not self.milvus_enabled:
             raise ValueError("milvus_required needs milvus_enabled=True")
         if self.elasticsearch_required and not self.elasticsearch_enabled:

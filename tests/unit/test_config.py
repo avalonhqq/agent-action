@@ -79,6 +79,40 @@ def test_redis_required_needs_redis_enabled() -> None:
     assert "redis_required" in str(exc_info.value)
 
 
+def test_graph_checkpoint_required_needs_enabled() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            _env_file=None,
+            graph_checkpoint_required=True,
+            graph_checkpoint_enabled=False,
+        )
+
+    assert "graph_checkpoint_required" in str(exc_info.value)
+
+
+def test_graph_checkpoint_key_length_is_validated() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, graph_checkpoint_encryption_key="too-short")
+
+    assert "graph_checkpoint_encryption_key" in str(exc_info.value)
+
+
+def test_production_graph_checkpoint_requires_encryption() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            _env_file=None,
+            environment="production",
+            database_auto_create=False,
+            api_token="production-api-token",
+            ui_storage_secret="production-storage-secret",
+            graph_checkpoint_enabled=True,
+        )
+
+    assert "graph checkpoints require a non-development encryption key" in str(
+        exc_info.value
+    )
+
+
 def test_milvus_required_needs_milvus_enabled() -> None:
     with pytest.raises(ValidationError) as exc_info:
         Settings(_env_file=None, milvus_required=True, milvus_enabled=False)

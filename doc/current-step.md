@@ -1,6 +1,8 @@
 # 当前学习入口
 
-前八周已经完成。第8周已形成结构化Grounded Answer、声明校验、RAG评估、可定位引用和Chat安全发布闭环；下一步为第9周LangGraph状态化工作流，实施前先讲思路并等待确认。
+前八周已经完成，第9周9A最小LangGraph及生产Checkpoint存储底座已完成：类型化State、Reducer、异步Node、
+Conditional Edge、双层循环保护、MongoDB Replica Set、AES加密、TTL和跨Saver恢复均已落地。当前下一步为
+9B，把真实Intent、RAG、Grounded Answer和本地NLI按节点接入Graph；实施前先讲思路并等待确认。
 
 第7周补充完成统一企业客服工作台：`/support/`现已覆盖问答、知识上传、领域词条、审核发布、
 版本制品和能力边界展示。
@@ -27,6 +29,7 @@ index.active`选择当前知识，ES使用对应布尔字段和owner过滤，版
 - [6D Golden Dataset 与 Recall@K](week6-learning-record.md#6-6dgolden-dataset-与-recallk已完成)
 - [第7周学习与任务记录](week7-learning-record.md)
 - [第8周学习与任务记录](week8-learning-record.md)
+- [第9周学习与任务记录](week9-learning-record.md)
 - [7A 中文Tokenizer与BM25基线](week7-learning-record.md#2-7a中文tokenizer与bm25单路基线已完成)
 - [7A-2 Jieba搜索分词优化](week7-learning-record.md#210-7a-2jieba搜索分词优化已完成)
 - [7A-3 生产级领域词典管理](week7-learning-record.md#211-7a-3生产级领域词典管理已完成)

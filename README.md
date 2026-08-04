@@ -38,7 +38,7 @@
 ```text
 agent-action/
 ├── Dockerfile                # 非 root 容器运行基线
-├── compose.yaml              # API、MySQL、Redis、Milvus、Elasticsearch 编排
+├── compose.yaml              # API、MySQL、Redis、Milvus、Elasticsearch、MongoDB 编排
 ├── alembic.ini               # 数据库迁移配置
 ├── migrations/               # 可追踪 Schema 迁移
 ├── pyproject.toml             # 项目元数据、依赖和质量工具配置
@@ -78,7 +78,7 @@ agent-action/
 - Windows 10/11、Linux 或 macOS。
 - Python 3.12 或更高版本。
 - Git，可选但推荐。
-- 默认 SQLite/Mock 模式不要求外部服务；启用完整Hybrid知识检索时需要MySQL、Milvus和Elasticsearch。
+- 默认 SQLite/Mock 模式不要求外部服务；启用完整Hybrid知识检索时需要MySQL、Milvus和Elasticsearch；启用LangGraph持久化恢复时需要MongoDB Replica Set。
 - Claim语义校验默认使用本地`mDeBERTa-v3-base-mnli-xnli`真实模型；首次问答会下载模型，生产部署应预下载并设置`BILI_SUPPORT_CLAIM_VERIFICATION_LOCAL_FILES_ONLY=true`。
 - 使用容器启动时需要 Docker Desktop 或 Docker Engine。
 
@@ -244,6 +244,33 @@ wsl -d Ubuntu-24.04 -- sh -lc "cd /mnt/c/workspace/agent-action && docker compos
 Compose 内的 API 使用 `http://milvus:19530`。默认 Collection 为
 `bili_support_child_v2`，其向量维度必须和 Embedding 模型一致。更换模型或维度时应创建
 新 Collection，不要复用不兼容的旧 Schema。
+
+## Windows + WSL2 启动 MongoDB Checkpoint
+
+LangGraph执行状态使用MongoDB保存，业务事实仍在MySQL。开发环境启动单节点Replica Set：
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/workspace/agent-action && docker compose up -d mongodb mongodb-init-replica"
+```
+
+确认副本集已经产生可写Primary：
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/workspace/agent-action && docker compose exec -T mongodb mongosh --quiet --eval 'db.adminCommand({hello:1}).isWritablePrimary'"
+```
+
+本地应用连接地址为
+`mongodb://127.0.0.1:27017/?directConnection=true&replicaSet=rs0`。Compose内API使用服务名
+`mongodb`。本地实例无认证且仅绑定`127.0.0.1`，不能照搬到生产；生产必须配置认证、TLS、多节点副本集、
+密钥管理、备份和恢复演练。Checkpoint载荷支持AES-EAX加密，生产必须通过Secret Manager注入
+`BILI_SUPPORT_GRAPH_CHECKPOINT_ENCRYPTION_KEY`（16/24/32字节）。`BILI_SUPPORT_GRAPH_CHECKPOINT_REQUIRED=true`时MongoDB不可用会失败关闭，
+不会降级为内存Saver。
+
+执行真实的“写入→关闭连接→新连接恢复”验收：
+
+```powershell
+.venv\Scripts\python.exe scripts\verify_mongodb_checkpoint.py
+```
 
 ## Windows + WSL2 启动 Elasticsearch
 

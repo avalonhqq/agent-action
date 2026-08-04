@@ -109,6 +109,40 @@ services:
     mem_limit: 3g
     restart: unless-stopped
 
+  mongodb:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  mongodb-init-replica:
+    image: mongo:8.0
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        mongosh --host mongodb:27017 --quiet --eval '
+          try {
+            rs.status();
+          } catch (error) {
+            rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongodb:27017"}]});
+          }
+        '
+        until mongosh --host mongodb:27017 --quiet --eval '
+          quit(db.adminCommand({hello: 1}).isWritablePrimary ? 0 : 1)
+        '; do sleep 2; done
+    restart: "no"
+
   api:
     build:
       context: .
@@ -133,6 +167,12 @@ services:
       BILI_SUPPORT_ELASTICSEARCH_URL: http://elasticsearch:9200
       BILI_SUPPORT_ELASTICSEARCH_INDEX_PREFIX: bili-support-child
       BILI_SUPPORT_ELASTICSEARCH_READ_ALIAS: bili-support-child-read
+      BILI_SUPPORT_GRAPH_CHECKPOINT_ENABLED: "true"
+      BILI_SUPPORT_GRAPH_CHECKPOINT_REQUIRED: "true"
+      BILI_SUPPORT_GRAPH_CHECKPOINT_MONGODB_URI: mongodb://mongodb:27017/?directConnection=true&replicaSet=rs0
+      BILI_SUPPORT_GRAPH_CHECKPOINT_DATABASE: bili_support_graph
+      BILI_SUPPORT_GRAPH_CHECKPOINT_TTL_SECONDS: "604800"
+      BILI_SUPPORT_GRAPH_CHECKPOINT_ENCRYPTION_KEY: ${BILI_SUPPORT_GRAPH_CHECKPOINT_ENCRYPTION_KEY:-local-dev-checkpoint-key-32-byte}
       BILI_SUPPORT_API_TOKEN: local-demo-token
       BILI_SUPPORT_UI_PREFILL_DEMO_CREDENTIALS: "true"
       BILI_SUPPORT_UI_STORAGE_SECRET: local-compose-ui-secret
@@ -145,6 +185,8 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
+      mongodb-init-replica:
+        condition: service_completed_successfully
     ports:
       - "8010:8010"
     restart: unless-stopped
@@ -156,3 +198,4 @@ volumes:
   milvus_minio_data:
   milvus_data:
   elasticsearch_data:
+  mongodb_data:

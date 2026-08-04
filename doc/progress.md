@@ -12,7 +12,7 @@
 | 6   | Embedding 与向量检索        | 已完成 | 2026-07-28 | 2026-07-31 | Milvus索引/检索、Small-to-Big；10条真实评估Recall@5 100%       |
 | 7   | 混合检索、Rerank 与策略        | 已完成 | 2026-07-31 | 2026-08-01 | Jieba+词典；Hybrid MRR 91.67%；策略v2错误回答率0%                 |
 | 8   | 证据生成与 RAG 评估           | 未开始 |            |            | Grounded Prompt、引用、拒答和 Faithfulness                |
-| 9   | LangGraph 状态化工作流       | 未开始 |            |            | 可回放、可恢复、有限步的模型工作流                                  |
+| 9   | LangGraph 状态化工作流       | 进行中 | 2026-08-04 |            | 9A最小图完成；下一步接入真实Intent、RAG和Verifier                    |
 | 10  | 多 Agent 与 Tool Calling | 未开始 |            |            | 路由、拆解、工具选择、确认和聚合                                   |
 | 11  | 校验、安全与模型观测             | 未开始 |            |            | Verification、注入、PII、降级和回归                          |
 | 12  | 效果优化与最终交付              | 未开始 |            |            | 端到端误差分析、调优、Demo 和面试表达                              |
@@ -106,6 +106,7 @@
 | 8B | Claim Verification | 已完成 | 声明支持度、数字事实、否定冲突、完整性和安全降级 |
 | 8C | RAG Evaluation | 已完成 | 6类固定集、Faithfulness、Relevancy、Citation指标和报告 |
 | 8D | 产品接入与复盘 | 已完成 | v4 Chat、最小直接引用、DeepSeek兼容重试和分层验证降级 |
+| 9A | 最小LangGraph与Checkpoint底座 | 已完成 | 类型化State、条件边、有限循环、MongoDB Replica Set、AES/TTL、跨Saver恢复 |
 
 ## 每周复盘模板
 

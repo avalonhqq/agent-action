@@ -24,6 +24,8 @@ from bili_support.core.exceptions import ServiceNotReadyError
 from bili_support.core.logging import configure_logging
 from bili_support.core.request_context import RequestContextMiddleware
 from bili_support.core.security import create_auth_dependency
+from bili_support.graph.checkpoints import MongoGraphCheckpointStore
+from bili_support.graph.workflow import build_week9a_graph
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier
@@ -88,6 +90,7 @@ def create_app(
     rerank_provider: RerankProvider | None = None,
     bm25_tokenizer: SearchTokenizer | None = None,
     claim_verifier: ClaimVerifier | None = None,
+    checkpoint_store: MongoGraphCheckpointStore | None = None,
 ) -> FastAPI:
     """使用显式注入或缓存配置创建完整 FastAPI 应用。"""
     current_settings = settings or get_settings()
@@ -285,12 +288,50 @@ def create_app(
         history_cache=current_history_cache,
     )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
+    current_checkpoint_store = checkpoint_store or (
+        MongoGraphCheckpointStore(
+            uri=current_settings.graph_checkpoint_mongodb_uri.get_secret_value(),
+            database=current_settings.graph_checkpoint_database,
+            checkpoint_collection=current_settings.graph_checkpoint_collection,
+            writes_collection=current_settings.graph_checkpoint_writes_collection,
+            ttl_seconds=current_settings.graph_checkpoint_ttl_seconds,
+            connect_timeout_seconds=(
+                current_settings.graph_checkpoint_connect_timeout_seconds
+            ),
+            encryption_key=(
+                current_settings.graph_checkpoint_encryption_key.get_secret_value()
+                if current_settings.graph_checkpoint_encryption_key is not None
+                else None
+            ),
+        )
+        if current_settings.graph_checkpoint_enabled
+        else None
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        """管理数据库、Redis 和模型客户端的应用级生命周期。"""
+        """管理数据库、Checkpoint、Redis和模型客户端的应用级生命周期。"""
         if current_settings.database_auto_create:
             await current_database.create_schema()
+        if current_checkpoint_store is not None:
+            try:
+                await current_checkpoint_store.start()
+            except Exception as exc:
+                if current_settings.graph_checkpoint_required:
+                    raise
+                logger.warning(
+                    "graph_checkpoint_startup_failed",
+                    error_type=type(exc).__name__,
+                )
+        # 只有真实MongoDB已通过启动探测时才注入Saver，不以MemorySaver伪装持久化。
+        application.state.customer_service_graph = build_week9a_graph(
+            checkpointer=(
+                current_checkpoint_store.saver
+                if current_checkpoint_store is not None
+                and current_checkpoint_store.started
+                else None
+            )
+        )
         # 生产模式在接流量前完成NLI加载；失败直接阻止实例进入Ready，而非请求时降级Mock。
         if current_settings.claim_verification_warmup and isinstance(
             current_claim_verifier, TransformersNliClaimVerifier
@@ -328,6 +369,8 @@ def create_app(
                 await current_vector_store.aclose()
             if current_lexical_store is not None:
                 await current_lexical_store.aclose()
+            if current_checkpoint_store is not None:
+                await current_checkpoint_store.close()
             await current_database.dispose()
 
     application = FastAPI(
@@ -360,6 +403,9 @@ def create_app(
     application.state.policy_retrieval_service = policy_retrieval_service
     application.state.lexical_store = current_lexical_store
     application.state.lexical_sync_service = lexical_sync_service
+    application.state.checkpoint_store = current_checkpoint_store
+    # lifespan启动后会用真实MongoDB Saver重新编译；启动前仅用于结构检查。
+    application.state.customer_service_graph = build_week9a_graph()
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -380,6 +426,14 @@ def create_app(
             "database": "ready",
             "llm_provider": "ready",
         }
+        if current_checkpoint_store is not None:
+            try:
+                await current_checkpoint_store.ping()
+                checks["graph_checkpoint_mongodb"] = "ready"
+            except Exception as exc:
+                if current_settings.graph_checkpoint_required:
+                    raise ServiceNotReadyError() from exc
+                checks["graph_checkpoint_mongodb"] = "degraded"
         if current_settings.claim_verification_warmup:
             if not (
                 isinstance(current_claim_verifier, TransformersNliClaimVerifier)
