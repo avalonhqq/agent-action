@@ -1,8 +1,8 @@
 # 当前学习入口
 
-前九周已经完成：最小Graph、真实Intent、Hybrid RAG、Grounded Answer、本地NLI、MongoDB Checkpoint、
-人工中断恢复、多轮上下文、安全流程回放与失败恢复策略已经进入同一条状态化工作流。当前下一步为第10周
-Supervisor、多Agent与工具调用；实施前先讲思路并等待确认。
+前九周已经完成。第10周计划已建立，当前进入10A-1“多Agent强类型契约”：先完成`AgentTask`、
+`SupervisorPlan`、`AgentResult`和`AggregationResult`，再实现Supervisor规划、执行波次、聚合和Graph影子接入。
+任务实施前先提供目标和示例，确认后再修改代码。
 
 第7周补充完成统一企业客服工作台：`/support/`现已覆盖问答、知识上传、领域词条、审核发布、
 版本制品和能力边界展示。
@@ -30,6 +30,7 @@ index.active`选择当前知识，ES使用对应布尔字段和owner过滤，版
 - [第7周学习与任务记录](week7-learning-record.md)
 - [第8周学习与任务记录](week8-learning-record.md)
 - [第9周学习与任务记录](week9-learning-record.md)
+- [第10周学习与任务记录](week10-learning-record.md)
 - [7A 中文Tokenizer与BM25基线](week7-learning-record.md#2-7a中文tokenizer与bm25单路基线已完成)
 - [7A-2 Jieba搜索分词优化](week7-learning-record.md#210-7a-2jieba搜索分词优化已完成)
 - [7A-3 生产级领域词典管理](week7-learning-record.md#211-7a-3生产级领域词典管理已完成)
