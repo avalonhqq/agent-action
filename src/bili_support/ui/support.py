@@ -380,9 +380,7 @@ def register_support_ui(
                         workflow_review_note = ui.input(
                             "处理意见", value="已核验用户诉求和风险，允许继续"
                         ).classes("grow")
-                        refresh_workflow_reviews_button = ui.button(
-                            "刷新待办", icon="refresh"
-                        )
+                        refresh_workflow_reviews_button = ui.button("刷新待办", icon="refresh")
                     workflow_review_list = ui.column().classes("w-full gap-3")
                     with workflow_review_list:
                         ui.label("点击“刷新待办”读取Graph审核队列。")
@@ -430,6 +428,7 @@ def register_support_ui(
                 ui.chat_message(content, name=current_actor.display_name, sent=True)
                 with ui.chat_message(name="BiliSupport AI"):
                     route_label = ui.label("").classes("text-caption text-grey-7")
+                    context_label = ui.label("").classes("text-caption text-grey-7")
                     route_detail = ui.markdown("").classes("text-caption text-grey-7")
                     answer = ui.markdown("")
             question.value = ""
@@ -445,6 +444,13 @@ def register_support_ui(
                         mock_label = " · Mock下游" if chunk.routing.mocked_downstream else ""
                         route_label.set_text(f"路由：{chunk.routing.target.value}{mock_label}")
                         route_detail.set_content(_routing_details(chunk.routing))
+                    if chunk.context_resolution is not None:
+                        resolved = chunk.context_resolution
+                        context_label.set_text(
+                            "上下文："
+                            f"{resolved.kind.value} · {resolved.source} · "
+                            f"{resolved.standalone_query or resolved.clarification_question}"
+                        )
                     complete += chunk.delta
                     answer.set_content(complete)
             except AppError as exc:
@@ -606,6 +612,14 @@ def register_support_ui(
                                     )
                             with ui.row().classes("gap-2"):
                                 ui.button(
+                                    "查看回放",
+                                    icon="timeline",
+                                    on_click=lambda _, review=item: show_workflow_timeline(
+                                        review.thread_id,
+                                        review.request_id,
+                                    ),
+                                ).props("flat")
+                                ui.button(
                                     "通过",
                                     icon="check",
                                     color="positive",
@@ -617,6 +631,36 @@ def register_support_ui(
                                     color="negative",
                                     on_click=lambda _, term_id=item.id: review_term(term_id, False),
                                 ).props("outline")
+
+        async def show_workflow_timeline(
+            thread_id: str,
+            execution_request_id: str,
+        ) -> None:
+            """展示脱敏Checkpoint时间线和确定性恢复建议。"""
+
+            try:
+                timeline = await service.execution_timeline(
+                    actor=actor(),
+                    thread_id=thread_id,
+                    execution_request_id=execution_request_id,
+                )
+            except AppError as exc:
+                ui.notify(exc.message, type="negative")
+                return
+            rows = [
+                f"{item.step}. `{item.current_node or 'input'}` → "
+                f"{('、'.join(item.next_nodes) or 'END')}"
+                + (f"（失败：{'、'.join(item.failed_nodes)}）" if item.failed_nodes else "")
+                + ("（等待审核）" if item.interrupted else "")
+                for item in timeline.steps
+            ]
+            workflow_result.set_content(
+                f"**执行状态：** {timeline.execution.status.value}  \n"
+                f"**恢复建议：** {timeline.recovery.action.value}  \n"
+                f"**原因：** {timeline.recovery.reason}\n\n"
+                "**Checkpoint时间线**\n\n"
+                + "\n".join(f"- {item}" for item in rows)
+            )
 
         async def review_term(term_id: str, approved: bool) -> None:
             note = (review_note.value or "").strip()

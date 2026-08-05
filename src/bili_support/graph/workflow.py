@@ -12,6 +12,11 @@ from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field
 
+from bili_support.conversation_context import (
+    ContextResolutionKind,
+    ConversationContextState,
+    advance_conversation_context,
+)
 from bili_support.core.exceptions import AppError
 from bili_support.core.security import UserContext
 from bili_support.graph.answer_policy import (
@@ -31,10 +36,16 @@ from bili_support.graph.state import (
 from bili_support.intent.types import IntentDecision
 from bili_support.llm.service import GroundedChatCompletionResult
 from bili_support.llm.types import ChatMessage, FinishReason, TokenUsage
-from bili_support.routing import CustomerServiceRoutePlan, CustomerServiceTarget
+from bili_support.routing import (
+    CustomerServiceRoutePlan,
+    CustomerServiceRouteSummary,
+    CustomerServiceTarget,
+)
 
 MAX_QUESTION_CHARS = 2000
-MAX_GRAPH_STEPS = 8
+# 完整知识问答链路包含初始化、输入校验、上下文解析、意图识别、检索、
+# 回答生成、声明校验与收尾。这里留出少量余量，避免正常路径触碰递归上限。
+MAX_GRAPH_STEPS = 12
 
 Week9AGraph = CompiledStateGraph[
     CustomerServiceGraphState,
@@ -52,7 +63,7 @@ Week9BGraph = CompiledStateGraph[
 
 
 async def initialize_node(
-        state: CustomerServiceGraphState,
+    state: CustomerServiceGraphState,
 ) -> GraphStateUpdate:
     """初始化运行期字段；9A不调用模型、检索、数据库或伪造客服回答。"""
 
@@ -67,7 +78,7 @@ async def initialize_node(
 
 
 async def validate_input_node(
-        state: CustomerServiceGraphState,
+    state: CustomerServiceGraphState,
 ) -> GraphStateUpdate:
     """校验空白、长度与业务步数；失败只返回稳定原因码。"""
 
@@ -93,7 +104,7 @@ async def validate_input_node(
 
 
 async def complete_node(
-        state: CustomerServiceGraphState,
+    state: CustomerServiceGraphState,
 ) -> GraphStateUpdate:
     """完成9A输入阶段，并声明9B应进入真实Intent节点。"""
 
@@ -108,7 +119,7 @@ async def complete_node(
 
 
 async def fail_node(
-        state: CustomerServiceGraphState,
+    state: CustomerServiceGraphState,
 ) -> GraphStateUpdate:
     """输入不合法时确定性结束，不触发任何高成本或有副作用能力。"""
 
@@ -123,22 +134,80 @@ async def fail_node(
 
 
 async def classify_intent_node(
-        state: CustomerServiceGraphState,
-        runtime: Runtime[CustomerServiceGraphContext],
+    state: CustomerServiceGraphState,
+    runtime: Runtime[CustomerServiceGraphContext],
 ) -> GraphStateUpdate:
     """调用真实HybridIntent与确定性CustomerServiceRouter。"""
 
-    rewrite = runtime.context.rewrite(state["normalized_question"], _history(state))
-    plan = await runtime.context.route(rewrite.standalone_query)
+    question = _effective_question(state)
+    plan = await runtime.context.route(question)
     decision = plan.intent_decision
+    resolution = state["context_resolution"]
+    next_context = advance_conversation_context(
+        ConversationContextState.model_validate(state["conversation_context"]),
+        decision=decision,
+        standalone_query=question,
+        reset_context=bool(resolution.get("reset_context", False)),
+    )
     return GraphStateUpdate(
         route_plan=plan.model_dump(mode="json"),
         intent_decision=(decision.model_dump(mode="json") if decision else None),
-        standalone_question=rewrite.standalone_query,
-        query_rewrite=rewrite.model_dump(mode="json"),
+        next_conversation_context=next_context.model_dump(mode="json"),
         current_node="classify_intent",
         visited_nodes=["classify_intent"],
         step_count=1,
+    )
+
+
+async def resolve_context_node(
+    state: CustomerServiceGraphState,
+    runtime: Runtime[CustomerServiceGraphContext],
+) -> GraphStateUpdate:
+    """在Intent前解析跨轮主题；歧义时直接生成确定性澄清计划。"""
+
+    resolution = await runtime.context.resolve_context(
+        state["normalized_question"],
+        _history(state),
+        ConversationContextState.model_validate(state["conversation_context"]),
+    )
+    update = GraphStateUpdate(
+        context_resolution=resolution.model_dump(mode="json"),
+        current_node="resolve_context",
+        visited_nodes=["resolve_context"],
+        step_count=1,
+    )
+    if resolution.standalone_query is not None:
+        update["standalone_question"] = resolution.standalone_query
+        update["query_rewrite"] = {
+            "original_query": resolution.original_query,
+            "standalone_query": resolution.standalone_query,
+            "rewritten": resolution.kind is ContextResolutionKind.RESOLVED,
+            "reason": resolution.kind.value,
+        }
+        return update
+    plan = CustomerServiceRoutePlan(
+        summary=CustomerServiceRouteSummary(
+            target=CustomerServiceTarget.CLARIFICATION,
+            mocked_downstream=False,
+            needs_clarification=True,
+        ),
+        use_chat_model=False,
+        response_override=resolution.clarification_question,
+    )
+    update["route_plan"] = plan.model_dump(mode="json")
+    update["intent_decision"] = None
+    update["response_override"] = resolution.clarification_question or "请补充具体主题。"
+    update["next_conversation_context"] = state["conversation_context"]
+    return update
+
+
+def route_after_context_resolution(state: CustomerServiceGraphState) -> str:
+    """上下文不唯一时禁止猜测，直接进入确定性澄清。"""
+
+    return (
+        "deterministic_response"
+        if state["context_resolution"].get("kind") == ContextResolutionKind.AMBIGUOUS.value
+        else "classify_intent"
     )
 
 
@@ -215,8 +284,8 @@ async def human_review_node(
 
 
 async def retrieve_knowledge_node(
-        state: CustomerServiceGraphState,
-        runtime: Runtime[CustomerServiceGraphContext],
+    state: CustomerServiceGraphState,
+    runtime: Runtime[CustomerServiceGraphContext],
 ) -> GraphStateUpdate:
     """执行策略感知Hybrid RAG，证据不足时在此失败关闭。"""
 
@@ -250,8 +319,8 @@ def route_after_retrieval(state: CustomerServiceGraphState) -> str:
 
 
 async def generate_grounded_node(
-        state: CustomerServiceGraphState,
-        runtime: Runtime[CustomerServiceGraphContext],
+    state: CustomerServiceGraphState,
+    runtime: Runtime[CustomerServiceGraphContext],
 ) -> GraphStateUpdate:
     """生成严格Grounded JSON；本节点不提前发布，也不执行NLI。"""
 
@@ -282,9 +351,7 @@ async def generate_grounded_node(
             )
         return GraphStateUpdate(
             route_plan=plan.model_dump(mode="json"),
-            response_override=(
-                "知识回答模型暂时不可用，本次没有展示未经验证的内容。请稍后重试。"
-            ),
+            response_override=("知识回答模型暂时不可用，本次没有展示未经验证的内容。请稍后重试。"),
             execution_error_code=exc.code.value,
             current_node="generate_grounded",
             visited_nodes=["generate_grounded"],
@@ -302,15 +369,13 @@ def route_after_grounded_generation(state: CustomerServiceGraphState) -> str:
     """模型依赖故障时安全降级；成功生成才进入真实NLI。"""
 
     return (
-        "deterministic_response"
-        if state.get("response_override") is not None
-        else "verify_claims"
+        "deterministic_response" if state.get("response_override") is not None else "verify_claims"
     )
 
 
 async def verify_claims_node(
-        state: CustomerServiceGraphState,
-        runtime: Runtime[CustomerServiceGraphContext],
+    state: CustomerServiceGraphState,
+    runtime: Runtime[CustomerServiceGraphContext],
 ) -> GraphStateUpdate:
     """调用真实NLI，并依据8E策略确定性发布或安全拦截。"""
 
@@ -339,8 +404,8 @@ async def verify_claims_node(
 
 
 async def general_chat_node(
-        state: CustomerServiceGraphState,
-        runtime: Runtime[CustomerServiceGraphContext],
+    state: CustomerServiceGraphState,
+    runtime: Runtime[CustomerServiceGraphContext],
 ) -> GraphStateUpdate:
     """闲聊路径调用真实回答Provider，不进入知识与NLI链路。"""
 
@@ -362,7 +427,7 @@ async def general_chat_node(
 
 
 async def deterministic_response_node(
-        state: CustomerServiceGraphState,
+    state: CustomerServiceGraphState,
 ) -> GraphStateUpdate:
     """安全、澄清、人工Mock或无证据路径直接返回策略文本。"""
 
@@ -406,9 +471,7 @@ def _route_plan(state: CustomerServiceGraphState) -> CustomerServiceRoutePlan:
     payload = dict(state["route_plan"])
     decision_payload = state.get("intent_decision")
     payload["intent_decision"] = (
-        IntentDecision.model_validate(decision_payload)
-        if decision_payload is not None
-        else None
+        IntentDecision.model_validate(decision_payload) if decision_payload is not None else None
     )
     return CustomerServiceRoutePlan.model_validate(payload)
 
@@ -431,9 +494,7 @@ def _effective_question(state: CustomerServiceGraphState) -> str:
     return state.get("standalone_question", state["normalized_question"])
 
 
-def build_week9a_graph(
-        *, checkpointer: BaseCheckpointSaver[str] | None = None
-) -> Week9AGraph:
+def build_week9a_graph(*, checkpointer: BaseCheckpointSaver[str] | None = None) -> Week9AGraph:
     """声明节点和边；传入真实Saver后由thread_id隔离并持久化状态。"""
 
     builder = StateGraph(CustomerServiceGraphState)
@@ -454,9 +515,7 @@ def build_week9a_graph(
     return builder.compile(checkpointer=checkpointer)
 
 
-def build_week9b_graph(
-        *, checkpointer: BaseCheckpointSaver[str] | None = None
-) -> Week9BGraph:
+def build_week9b_graph(*, checkpointer: BaseCheckpointSaver[str] | None = None) -> Week9BGraph:
     """编译9B真实客服Graph；外部服务通过context_schema注入。"""
 
     builder = StateGraph(
@@ -465,6 +524,7 @@ def build_week9b_graph(
     )
     builder.add_node("initialize", initialize_node)
     builder.add_node("validate_input", validate_input_node)
+    builder.add_node("resolve_context", resolve_context_node)
     builder.add_node("classify_intent", classify_intent_node)
     builder.add_node("retrieve_knowledge", retrieve_knowledge_node)
     builder.add_node("generate_grounded", generate_grounded_node)
@@ -480,7 +540,15 @@ def build_week9b_graph(
     builder.add_conditional_edges(
         "validate_input",
         route_after_input_validation,
-        {"complete": "classify_intent", "fail": "fail"},
+        {"complete": "resolve_context", "fail": "fail"},
+    )
+    builder.add_conditional_edges(
+        "resolve_context",
+        route_after_context_resolution,
+        {
+            "classify_intent": "classify_intent",
+            "deterministic_response": "deterministic_response",
+        },
     )
     builder.add_conditional_edges(
         "classify_intent",
@@ -518,10 +586,10 @@ def build_week9b_graph(
 
 
 async def run_week9a_graph(
-        state: CustomerServiceGraphState,
-        *,
-        recursion_limit: int = MAX_GRAPH_STEPS,
-        checkpointer: BaseCheckpointSaver[str] | None = None,
+    state: CustomerServiceGraphState,
+    *,
+    recursion_limit: int = MAX_GRAPH_STEPS,
+    checkpointer: BaseCheckpointSaver[str] | None = None,
 ) -> CustomerServiceGraphState:
     """统一异步调用入口，始终带框架级循环上限。"""
 

@@ -41,10 +41,25 @@ class Conversation(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     thread_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=new_id)
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(120))
+
+
+class ConversationContextSnapshot(TimestampMixin, Base):
+    """跨轮主题栈的MySQL事实快照；Redis只能作为可丢失缓存。"""
+
+    __tablename__ = "conversation_context_snapshots"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", name="uq_context_snapshot_conversation"),
+        CheckConstraint("version >= 0", name="version_non_negative"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    state_json: Mapped[dict[str, object]] = mapped_column(JSON)
 
 
 class Message(Base):
@@ -261,8 +276,7 @@ class KnowledgeDictionaryTerm(TimestampMixin, Base):
             name="status_allowed",
         ),
         CheckConstraint(
-            "term_type IN ('product', 'feature', 'issue', 'action', "
-            "'error_code', 'other')",
+            "term_type IN ('product', 'feature', 'issue', 'action', 'error_code', 'other')",
             name="term_type_allowed",
         ),
         CheckConstraint(

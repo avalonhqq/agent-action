@@ -34,8 +34,8 @@ START
 
 ### 2.3 双层循环保护
 
-- `MAX_GRAPH_STEPS=8`用于业务状态审计和提前失败关闭；
-- LangGraph调用配置中的`recursion_limit=8`是框架级最后保险；
+- `MAX_GRAPH_STEPS=12`用于业务状态审计和提前失败关闭，并容纳上下文解析后的完整RAG链路；
+- LangGraph调用配置中的`recursion_limit=12`是框架级最后保险；
 - 两者职责不同，不能只依赖异常作为正常业务分支。
 
 ### 2.4 当前边界
@@ -351,16 +351,179 @@ Graph：从human_review恢复，不重复执行classify_intent
 
 这项修正只提高结构输出完整率，不放松Grounded Schema、证据ID白名单或本地NLI门禁。
 
-### 8.1 多轮省略问句必须在意图识别前上下文化
+## 9. 9C补充：生产型多轮上下文解析
 
-联调中用户先问“大会员能做什么”，再问“多少钱”。旧链路虽然把历史交给后续检索和回答，但
-`classify_intent`只接收当前文本“多少钱”，导致主题缺失；一旦此次模型又返回空正文，正常追问就会错误进入人工审核。
+### 9.1 为什么“只向上找一条”不够
 
-现在Graph在意图节点前调用同一套保守`StandaloneQueryRewriter`。它只对价格、生效时间、权益等白名单短问句，
-从最近一条用户消息提取明确的客服主题，例如将“多少钱”补全为“大会员多少钱”；原问题和改写结果同时保存在
-Checkpoint中。意图、检索和Grounded生成统一使用独立问题，避免各阶段理解不同。无法确认主题时保持原文并继续
-失败关闭，不猜测用户所指对象。
+联调中用户先问“大会员能做什么”，再问“多少钱”。只检查最近一条用户消息能修复这个例子，却无法处理用户在
+会员、订单、客户端等多个主题之间切换后再追问，也无法在“大会员套餐”和“订单套餐”都可能有价格时识别歧义。
+这类方案会把“最近”误当成“所指对象”，在生产客服中容易错路由甚至错执行。
 
-“大会员＋价格”同时加入高精度规则`membership.price_query:v1`，直接产生`membership/query`和产品实体，
-不调用意图模型；开放语义问题仍由模型处理。这体现Hybrid Intent的职责：稳定、低风险、边界清晰的表达交给规则，
-长尾表达交给模型。
+### 9.2 新的语义状态
+
+系统为每个会话维护一个有界`ConversationContextState`：
+
+- `active_topics`：最近确认的最多5个主题，而不是原始对话的无界摘要；
+- `primary_domain`：当前主业务域；
+- `confirmed_entity_values`：可安全长期保存的产品实体；
+- `unresolved_slots`：待澄清槽位；
+- `last_standalone_query`与`context_version`：追踪上一次完整问题及并发版本。
+
+主题只从通过严格Schema的`IntentDecision`推进，不从助手自由文本中抽取事实。订单号、账号、交易号等敏感标识
+不复制进主题快照；如确有业务需要，应从受权限保护的消息事实中读取，或接入专门的加密槽位存储。
+
+### 9.3 解析算法
+
+```text
+当前短问句“多少钱”
+  → 识别为价格槽位追问
+  → 从全部活动主题筛选 membership/order 兼容主题
+      ├─ 唯一候选：规则补全，例如“大会员多少钱”
+      ├─ 多个候选：结构化模型只能从候选 topic key 中选择
+      └─ 模型失败/仍不唯一：生成确定性澄清问题，禁止猜测
+  → 完整问题进入 Intent → Retrieval → Grounded Answer
+```
+
+显式输入“换个问题：账号怎么找回”会清空旧主题后再建立账号主题。普通完整问句不需要模型解析，直接进入意图
+识别。模型只负责指代消解，不回答业务问题，也不能创建候选之外的主题或事实。
+
+### 9.4 Graph、MySQL、Redis与MongoDB的分工
+
+`resolve_context`已成为`validate_input`和`classify_intent`之间的正式Graph节点。解析结果和本轮快照进入MongoDB
+Checkpoint，支持解释某次执行为什么继承了某个主题；最新长期快照以MySQL
+`conversation_context_snapshots`为事实源，并与助手消息、模型审计在同一事务内提交；Redis只保存有TTL的热缓存，
+缓存失效后回源MySQL。
+
+```text
+MySQL：最新会话语义事实快照        Redis：低延迟热缓存
+MongoDB：某次Graph执行过程         原始messages：完整对话事实
+```
+
+页面和SSE会展示`standalone/resolved/ambiguous`、解析来源与补全问题；受会话所有权保护的
+`GET /api/v1/conversations/{thread_id}/context`可用于运营排障。
+
+### 9.5 贯穿示例
+
+```text
+第1轮：大会员能做什么
+Intent：membership/query + product=大会员
+Context：active_topics=[大会员]，version=1
+
+第2轮：多少钱
+Resolver：价格槽位只有“大会员”兼容 → 大会员多少钱
+Intent：命中 membership.price_query:v1
+Context：主题更新，version=2
+
+另一场景：同时存在“大会员套餐”和“订单套餐”后询问“多少钱”
+Resolver：两个兼容主题 → 模型在白名单中消歧；不确定则询问具体指哪一个
+```
+
+### 9.6 代码阅读顺序
+
+```text
+conversation_context.py              状态、规则、模型白名单与安全推进
+→ graph/state.py                     可持久化字段
+→ graph/context.py                   运行期Resolver注入
+→ graph/workflow.py                  resolve_context节点与条件边
+→ services/conversations.py          MySQL事务、Redis回源和版本持久化
+→ core/cache.py                      上下文热缓存
+→ api/conversations.py / ui/support.py  可解释输出
+```
+
+### 9.7 思考题与答案
+
+**问题1：为什么不直接把全部历史交给意图模型？**
+
+答案：历史越长成本和歧义越高，而且模型输出无法作为稳定的长期状态。主题栈负责有界、可审计的语义记忆，近期历史
+只在多个候选需要消歧时作为辅助证据。
+
+**问题2：为什么规则判断后还需要模型？**
+
+答案：规则擅长识别“价格”“退款”等槽位，却不能在多个兼容主题中理解自然语言指代。结构化模型补足长尾表达，但
+被候选key白名单约束；二者都不能确定时由用户澄清。
+
+**问题3：为什么MySQL和Redis都保存上下文？**
+
+答案：MySQL负责持久和事务一致性，Redis负责低延迟读取。Redis丢失不会丢事实，MySQL不可用时也不会把缓存冒充
+持久化真值。
+
+## 10. 9D：流程回放、失败恢复策略与本周复盘
+
+### 10.1 实现目标
+
+9D把MongoDB中已有的Checkpoint历史转换为可供客服运营阅读的节点时间线。接口不会返回原始State、用户问题、
+历史消息、证据正文或异常原文，只展示节点、前后关系、写入节点、失败节点和中断标记。
+
+```text
+input → initialize → validate_input → resolve_context → classify_intent
+      → retrieve_knowledge → generate_grounded → verify_claims → finalize
+```
+
+### 10.2 为什么只读回放不等于重新执行
+
+LangGraph真正的Replay会从指定`checkpoint_id`重新运行其后的节点。LLM、检索API、业务工具和Interrupt都会再次
+触发，结果可能变化，也可能造成重复副作用。因此客服工作台默认提供只读时间线，而不是无条件的“一键重跑”。
+
+恢复策略由确定性代码根据Checkpoint任务状态和MySQL `model_calls.error_code`生成：
+
+| 当前事实 | 建议动作 | 是否自动重试 |
+|---|---|---|
+| 已完成 | `none` | 否 |
+| 等待人工Interrupt | `resume_review` | 否，使用受控Command.resume |
+| 临时依赖错误 | `retry_checkpoint` | 否，需运营确认副作用边界 |
+| 输入或策略拒绝 | `correct_input` | 否，修正后创建新请求 |
+| 未知/永久错误 | `operator_inspect` | 否，先排障 |
+
+可从Checkpoint重试的错误白名单只包含`MODEL_UNAVAILABLE`、`SERVICE_NOT_READY`和`INTERNAL_ERROR`。模型响应格式
+错误、权限错误、冲突和业务拒绝不会自动重跑。底层模型Provider已有有限退避重试，Graph层不再叠加自动重试，
+避免重试风暴和成本放大。
+
+### 10.3 安全时间线字段
+
+每个`GraphTimelineStep`只包含：
+
+- `checkpoint_id`、`step`、`source`和创建时间；
+- `current_node`和`next_nodes`；
+- `written_nodes`、`failed_nodes`和`interrupted`；
+- 不包含Checkpoint的`values`和Task异常文本。
+
+接口：
+
+```text
+GET /api/v1/conversations/{thread_id}/executions/{request_id}/timeline
+```
+
+接口执行原有会话所有权校验。流程审核页面的“查看回放”会展示时间线和恢复建议。
+
+### 10.4 代码阅读顺序
+
+```text
+schemas/conversations.py       时间线和恢复动作契约
+→ graph/replay.py              脱敏映射、失败识别和恢复策略
+→ services/conversations.py   所有权、MongoDB history与MySQL错误码合并
+→ api/conversations.py         timeline HTTP接口
+→ ui/support.py                运营工作台时间线
+```
+
+### 10.5 思考题与答案
+
+**问题1：为什么恢复判断不能只看Graph State中的`status`？**
+
+答案：节点抛异常时可能来不及把业务状态写成`failed`，但LangGraph Task已经保存错误和pending writes。9D同时检查
+显式状态与Task错误，避免把异常执行误判为完成。
+
+**问题2：为什么不把异常字符串直接展示给页面？**
+
+答案：异常可能包含Provider地址、请求片段、账号或基础设施信息。页面只展示稳定错误码和失败节点，详细堆栈留在
+受控日志系统中。
+
+**问题3：为什么临时错误也不直接自动Replay？**
+
+答案：Replay会重新执行后续节点。第10周接入真实工具后，这些节点可能创建工单、退款或修改账号；未确认幂等键和
+副作用边界前，自动重跑不安全。
+
+### 10.6 第9周复盘
+
+第9周完成了从线性Service调用到状态化工作流的迁移：9A建立有限步Graph，9B接入真实Intent、RAG与NLI，9C
+完成MongoDB持久化、人工Interrupt/Resume和多轮主题上下文，9D补齐安全回放与恢复决策。第10周可以在这些边界上
+引入Supervisor、多Agent和工具调用，而无需把路由、记忆、审核和恢复重新塞回一个大函数。

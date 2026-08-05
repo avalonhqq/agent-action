@@ -6,7 +6,7 @@
 
 ## 项目状态
 
-前八周及第9周9C已经完成，Milvus、Elasticsearch、本地NLI和LangGraph MongoDB Checkpoint已接入：
+前九周已经完成，Milvus、Elasticsearch、本地NLI和LangGraph MongoDB Checkpoint已接入：
 项目具备工程基线、可替换的LLM调用链路、状态化客服工作流、可持久化多用户会话，以及可追溯、
 可版本化的文档解析能力。
 
@@ -484,6 +484,8 @@ X-User-Name: 演示用户
 | POST | `/api/v1/conversations` | 创建会话并获得 Thread ID |
 | GET | `/api/v1/conversations` | 列举当前用户会话 |
 | GET | `/api/v1/conversations/{thread_id}/messages` | 恢复历史消息 |
+| GET | `/api/v1/conversations/{thread_id}/context` | 查看当前会话的结构化主题栈（需会话所有权） |
+| GET | `/api/v1/conversations/{thread_id}/executions/{request_id}/timeline` | 脱敏回放Checkpoint时间线并查看恢复建议 |
 | POST | `/api/v1/conversations/{thread_id}/messages` | 普通回复并持久化 |
 | POST | `/api/v1/conversations/{thread_id}/messages/stream` | SSE 回复并持久化 |
 

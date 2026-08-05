@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -114,9 +115,7 @@ def test_user_can_continue_history_and_cannot_read_another_user_thread(
             headers=_headers(),
         )
         own_list = client.get("/api/v1/conversations", headers=_headers())
-        other_list = client.get(
-            "/api/v1/conversations", headers=_headers(user_id="user-b")
-        )
+        other_list = client.get("/api/v1/conversations", headers=_headers(user_id="user-b"))
         forbidden_by_hiding = client.get(
             f"/api/v1/conversations/{thread_id}/messages",
             headers=_headers(user_id="user-b"),
@@ -182,9 +181,7 @@ def test_stream_is_persisted_and_database_survives_app_restart(tmp_path: Path) -
 
     second_app = create_app(settings)
     with TestClient(second_app) as client:
-        history = client.get(
-            f"/api/v1/conversations/{thread_id}/messages", headers=_headers()
-        )
+        history = client.get(f"/api/v1/conversations/{thread_id}/messages", headers=_headers())
 
     assert history.status_code == 200
     assert [item["content"] for item in history.json()["data"]] == [
@@ -213,9 +210,7 @@ def test_model_failure_preserves_user_message_and_auditable_error(tmp_path: Path
             json={"content": "你好"},
             headers=_headers(request_id="failed-call-1"),
         )
-        history = client.get(
-            f"/api/v1/conversations/{thread_id}/messages", headers=_headers()
-        )
+        history = client.get(f"/api/v1/conversations/{thread_id}/messages", headers=_headers())
 
     assert failed.status_code == 503
     assert [item["role"] for item in history.json()["data"]] == ["user"]
@@ -257,8 +252,7 @@ def test_knowledge_route_without_evidence_does_not_call_free_model(
     assert "没有找到足够依据" in data["answer"]
     with sqlite3.connect(database_path) as connection:
         call = connection.execute(
-            "SELECT operation, model, total_tokens FROM model_calls "
-            "WHERE request_id = ?",
+            "SELECT operation, model, total_tokens FROM model_calls WHERE request_id = ?",
             ("no-evidence-1",),
         ).fetchone()
     assert call == ("complete:knowledge_rag", "deterministic-knowledge", 0)
@@ -296,8 +290,7 @@ def test_unsafe_route_skips_answer_model_and_is_auditable(tmp_path: Path) -> Non
     assert "不能协助" in response.json()["data"]["answer"]
     with sqlite3.connect(database_path) as connection:
         call = connection.execute(
-            "SELECT operation, model, total_tokens FROM model_calls "
-            "WHERE request_id = ?",
+            "SELECT operation, model, total_tokens FROM model_calls WHERE request_id = ?",
             ("unsafe-route-1",),
         ).fetchone()
     assert call == ("complete:safety", "deterministic-routing", 0)
@@ -339,6 +332,10 @@ def test_graph_interrupt_review_and_resume_is_persisted(tmp_path: Path) -> None:
             f"/api/v1/conversations/{thread_id}/executions/graph-interrupt-1",
             headers=_headers(),
         )
+        owner_timeline = client.get(
+            f"/api/v1/conversations/{thread_id}/executions/graph-interrupt-1/timeline",
+            headers=_headers(),
+        )
         ordinary_pending = client.get(
             "/api/v1/conversations/reviews/pending",
             headers=_headers(),
@@ -365,6 +362,11 @@ def test_graph_interrupt_review_and_resume_is_persisted(tmp_path: Path) -> None:
     assert interrupted_data["routing"]["target"] == "human_review_mock"
     assert owner_status.status_code == 200
     assert owner_status.json()["data"]["interrupt"]["kind"] == "human_review"
+    assert owner_timeline.status_code == 200
+    timeline_data = owner_timeline.json()["data"]
+    assert timeline_data["recovery"]["action"] == "resume_review"
+    assert timeline_data["steps"][-1]["interrupted"] is True
+    assert "values" not in timeline_data["steps"][-1]
     assert ordinary_pending.status_code == 403
     assert pending.status_code == 200
     assert pending.json()["data"][0]["request_id"] == "graph-interrupt-1"
@@ -386,3 +388,58 @@ def test_graph_interrupt_review_and_resume_is_persisted(tmp_path: Path) -> None:
         ).fetchone()
     assert review == ("approved", "身份材料已由客服核验")
     assert resume_call == ("resume:human_review_mock", "success")
+
+
+def test_multi_turn_context_is_persisted_and_reused_before_intent(tmp_path: Path) -> None:
+    database_path = tmp_path / "multi-turn-context.db"
+    settings = _settings(database_path).model_copy(
+        update={
+            "intent_mock_response": (
+                '{"route":"supported","intents":[{"domain":"membership",'
+                '"action":"query","confidence":0.98}],"entities":['
+                '{"type":"product","raw_value":"大会员",'
+                '"normalized_value":"大会员"}],"sentiment":"neutral",'
+                '"risk":"low","confidence":0.98,"needs_clarification":false,'
+                '"clarification_question":null,"source":"model"}'
+            )
+        }
+    )
+
+    with TestClient(create_app(settings, llm_provider=_UnavailableProvider())) as client:
+        thread_id = client.post(
+            "/api/v1/conversations",
+            json={"title": "上下文持久化"},
+            headers=_headers(),
+        ).json()["data"]["thread_id"]
+        first = client.post(
+            f"/api/v1/conversations/{thread_id}/messages",
+            json={"content": "大会员能做什么"},
+            headers=_headers(request_id="context-turn-1"),
+        )
+        second = client.post(
+            f"/api/v1/conversations/{thread_id}/messages",
+            json={"content": "多少钱"},
+            headers=_headers(request_id="context-turn-2"),
+        )
+        context_response = client.get(
+            f"/api/v1/conversations/{thread_id}/context",
+            headers=_headers(),
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    resolution = second.json()["data"]["context_resolution"]
+    assert resolution["kind"] == "resolved"
+    assert resolution["standalone_query"] == "大会员多少钱"
+    assert second.json()["data"]["routing"]["rule_id"] == "membership.price_query:v1"
+    assert context_response.status_code == 200
+    assert context_response.json()["data"]["context_version"] == 2
+    assert context_response.json()["data"]["active_topics"][0]["label"] == "大会员"
+
+    with sqlite3.connect(database_path) as connection:
+        snapshot = connection.execute(
+            "SELECT version, state_json FROM conversation_context_snapshots"
+        ).fetchone()
+    assert snapshot is not None
+    assert snapshot[0] == 2
+    assert json.loads(snapshot[1])["primary_domain"] == "membership"

@@ -104,3 +104,24 @@ class ModelCallRepository:
 
     def add(self, call: ModelCall) -> None:
         self._session.add(call)
+
+    async def latest_for_request(
+        self,
+        *,
+        conversation_id: str,
+        request_id: str,
+    ) -> ModelCall | None:
+        """读取一次Graph执行最近的MySQL审计结果，供恢复策略判断错误类别。"""
+
+        return cast(
+            ModelCall | None,
+            await self._session.scalar(
+                select(ModelCall)
+                .where(
+                    ModelCall.conversation_id == conversation_id,
+                    ModelCall.request_id == request_id,
+                )
+                .order_by(ModelCall.created_at.desc(), ModelCall.id.desc())
+                .limit(1)
+            ),
+        )

@@ -109,6 +109,8 @@
 | 9A | 最小LangGraph与Checkpoint底座 | 已完成 | 类型化State、条件边、有限循环、MongoDB Replica Set、AES/TTL、跨Saver恢复 |
 | 9B | 真实客服能力Graph化 | 已完成 | Intent、Hybrid RAG、Grounded生成、本地NLI、会话API与SSE统一接线 |
 | 9C | 人工中断与断点恢复 | 已完成 | MongoDB interrupt/resume、MySQL审核事实、原子领取、恢复API与流程审核页 |
+| 9C-Context | 多轮主题解析 | 已完成 | 主题栈、槽位兼容、结构化模型消歧、安全澄清、MySQL快照与Redis缓存 |
+| 9D | 流程回放与失败恢复策略 | 已完成 | 脱敏Checkpoint时间线、Task失败识别、恢复动作分级与工作台展示 |
 
 ## 每周复盘模板
 

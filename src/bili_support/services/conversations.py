@@ -14,6 +14,12 @@ from langgraph.types import Command, StateSnapshot
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bili_support.conversation_context import (
+    ContextResolution,
+    ContextResolutionKind,
+    ConversationContextResolver,
+    ConversationContextState,
+)
 from bili_support.core.cache import ConversationHistoryCache, NullConversationHistoryCache
 from bili_support.core.database import Database
 from bili_support.core.exceptions import (
@@ -24,9 +30,13 @@ from bili_support.core.exceptions import (
 )
 from bili_support.core.security import UserContext
 from bili_support.graph.context import CustomerServiceGraphContext
+from bili_support.graph.replay import (
+    build_safe_timeline,
+    recommend_recovery,
+    snapshot_has_failure,
+)
 from bili_support.graph.state import (
     CustomerServiceGraphState,
-    GraphRunStatus,
     create_week9b_graph_input,
 )
 from bili_support.graph.workflow import MAX_GRAPH_STEPS, Week9BGraph, build_week9b_graph
@@ -38,8 +48,15 @@ from bili_support.llm.types import (
     MessageRole,
     TokenUsage,
 )
-from bili_support.models.entities import Conversation, GraphReview, Message, ModelCall
+from bili_support.models.entities import (
+    Conversation,
+    ConversationContextSnapshot,
+    GraphReview,
+    Message,
+    ModelCall,
+)
 from bili_support.repositories import (
+    ConversationContextRepository,
     ConversationRepository,
     GraphReviewRepository,
     MessageRepository,
@@ -54,6 +71,7 @@ from bili_support.routing import (
 from bili_support.schemas.conversations import (
     ConversationMessageResult,
     GraphExecutionStatus,
+    GraphExecutionTimeline,
     GraphExecutionView,
     PendingGraphReviewView,
 )
@@ -74,6 +92,8 @@ class _GraphExecutionOutcome:
     usage: TokenUsage
     prompt_version: str
     execution: GraphExecutionView
+    context_resolution: ContextResolution
+    next_context: ConversationContextState
 
 
 class ConversationService:
@@ -94,6 +114,7 @@ class ConversationService:
         customer_rerank_enabled: bool = False,
         rerank_candidate_k: int = 10,
         history_cache: ConversationHistoryCache | None = None,
+        context_resolver: ConversationContextResolver | None = None,
         review_admin_user_ids: str = "review-admin",
     ) -> None:
         if not 1 <= rerank_candidate_k <= 20:
@@ -111,6 +132,7 @@ class ConversationService:
             policy_retriever=policy_retriever,
             chat=chat_service,
             retrieval_mode=customer_retrieval_mode,
+            context_resolver=context_resolver or ConversationContextResolver(),
         )
         self._graph: Week9BGraph = build_week9b_graph()
         self._review_admin_user_ids = frozenset(
@@ -167,6 +189,34 @@ class ConversationService:
             await session.commit()
             return messages
 
+    async def context(
+        self,
+        actor: UserContext,
+        thread_id: str,
+    ) -> ConversationContextState:
+        """读取当前用户会话的结构化主题快照，供前端解释与运营排障。"""
+
+        async with self._database.session() as session:
+            user = await UserRepository(session).get_or_create(
+                actor.external_id, actor.display_name
+            )
+            conversation = await self._owned_conversation(session, thread_id, user.id)
+            cached = await self._cached_context(thread_id)
+            snapshot = (
+                await ConversationContextRepository(session).get(conversation.id)
+                if cached is None
+                else None
+            )
+            await session.commit()
+        if cached is not None:
+            return cached
+        if snapshot is None:
+            return ConversationContextState.empty()
+        try:
+            return ConversationContextState.model_validate(snapshot.state_json)
+        except ValueError:
+            return ConversationContextState.empty()
+
     async def list_pending_reviews(
         self,
         actor: UserContext,
@@ -198,6 +248,48 @@ class ConversationService:
             snapshot,
             thread_id=thread_id,
             request_id=execution_request_id,
+        )
+
+    async def execution_timeline(
+        self,
+        *,
+        actor: UserContext,
+        thread_id: str,
+        execution_request_id: str,
+    ) -> GraphExecutionTimeline:
+        """回放某次执行的脱敏Checkpoint时间线并给出确定性恢复建议。"""
+
+        await self._authorize_execution_access(actor, thread_id)
+        if not self._graph_context.interrupt_enabled:
+            raise ResourceNotFoundError("Graph持久化未启用，无法回放历史执行")
+        config = _graph_config(thread_id, execution_request_id, actor.external_id)
+        snapshots = [item async for item in self._graph.aget_state_history(config, limit=50)]
+        if not snapshots:
+            raise ResourceNotFoundError("Graph执行不存在或已过期")
+
+        # 错误码来自MySQL审计，不读取或返回Checkpoint中的异常原文。
+        async with self._database.session() as session:
+            conversation = await ConversationRepository(session).get_by_thread_id(thread_id)
+            if conversation is None:  # 已经过所有权校验，防御并发删除
+                raise ResourceNotFoundError("会话不存在")
+            call = await ModelCallRepository(session).latest_for_request(
+                conversation_id=conversation.id,
+                request_id=execution_request_id,
+            )
+            await session.commit()
+        latest = snapshots[0]
+        execution = _execution_view_from_snapshot(
+            latest,
+            thread_id=thread_id,
+            request_id=execution_request_id,
+        )
+        return GraphExecutionTimeline(
+            execution=execution,
+            steps=build_safe_timeline(snapshots),
+            recovery=recommend_recovery(
+                latest,
+                audit_error_code=call.error_code if call is not None else None,
+            ),
         )
 
     async def resume_execution(
@@ -269,6 +361,8 @@ class ConversationService:
             usage=TokenUsage.model_validate(state["usage"]),
             prompt_version=state["prompt_version"],
             execution=execution,
+            context_resolution=_resolve_context_resolution(state),
+            next_context=_resolve_next_context(state),
         )
         await self._persist_resume_outcome(
             actor=actor,
@@ -288,6 +382,7 @@ class ConversationService:
             prompt_version=outcome.prompt_version,
             routing=outcome.route_plan.summary,
             execution=outcome.execution,
+            context_resolution=outcome.context_resolution,
         )
 
     async def send(
@@ -307,7 +402,7 @@ class ConversationService:
         4. 持久化结果（消息 + ModelCall 记录）。
         5. 无论成功/失败/取消，都会写入 ModelCall 审计记录。
         """
-        conversation_id, user_message_id, history = await self._save_user_message(
+        conversation_id, user_message_id, history, context_state = await self._save_user_message(
             actor=actor,
             thread_id=thread_id,
             content=content,
@@ -322,6 +417,7 @@ class ConversationService:
                 content=content,
                 request_id=request_id,
                 history=history,
+                context_state=context_state,
             )
             route_plan = outcome.route_plan
             answer = outcome.answer
@@ -383,6 +479,7 @@ class ConversationService:
             assistant_content=answer,
             model=model,
             prompt_version=prompt_version,
+            context_state=outcome.next_context,
         )
         if outcome.execution.status is GraphExecutionStatus.INTERRUPTED:
             await self._ensure_pending_review(
@@ -403,6 +500,7 @@ class ConversationService:
             prompt_version=prompt_version,
             routing=route_plan.summary,
             execution=outcome.execution,
+            context_resolution=outcome.context_resolution,
         )
 
     async def stream(
@@ -420,7 +518,7 @@ class ConversationService:
         - 后续 chunk 逐字输出增量文本。
         - 持久化在 finally 块中完成，确保即使流中断也写入审计记录。
         """
-        conversation_id, user_message_id, history = await self._save_user_message(
+        conversation_id, user_message_id, history, context_state = await self._save_user_message(
             actor=actor,
             thread_id=thread_id,
             content=content,
@@ -434,6 +532,7 @@ class ConversationService:
         route_plan: CustomerServiceRoutePlan | None = None
         model: str | None = None
         prompt_version: str | None = None
+        next_context_for_persistence: ConversationContextState | None = None
         try:
             # 9B统一执行Graph；SSE仍保持route→delta→completed协议。知识回答必须在
             # Grounded结构和NLI全部通过后才能一次性发布，因此不流出未经验证的Token。
@@ -443,11 +542,13 @@ class ConversationService:
                 content=content,
                 request_id=request_id,
                 history=history,
+                context_state=context_state,
             )
             route_plan = outcome.route_plan
             model = outcome.model
             prompt_version = outcome.prompt_version
             usage = outcome.usage
+            next_context_for_persistence = outcome.next_context
             if outcome.execution.status is GraphExecutionStatus.INTERRUPTED:
                 await self._ensure_pending_review(
                     actor=actor,
@@ -461,6 +562,7 @@ class ConversationService:
                 routing=route_plan.summary,
                 execution_status=outcome.execution.status.value,
                 execution_id=outcome.execution.execution_id,
+                context_resolution=outcome.context_resolution,
             )
             yield CustomerServiceStreamChunk(delta=outcome.answer)
             yield CustomerServiceStreamChunk(
@@ -495,6 +597,7 @@ class ConversationService:
                 assistant_content="".join(answer_parts) if status == "success" else None,
                 model=model,
                 prompt_version=prompt_version,
+                context_state=next_context_for_persistence,
             )
 
     async def _run_graph(
@@ -505,6 +608,7 @@ class ConversationService:
         content: str,
         request_id: str,
         history: list[ChatMessage],
+        context_state: ConversationContextState,
     ) -> _GraphExecutionOutcome:
         """执行9C Graph；可能完成，也可能在真实interrupt处返回待审核状态。"""
 
@@ -515,6 +619,7 @@ class ConversationService:
             display_name=actor.display_name,
             question=content,
             history=[item.model_dump(mode="json") for item in history],
+            conversation_context=context_state.model_dump(mode="json"),
         )
         # 每条消息是独立Graph执行单元；conversation_id保留业务会话语义，request_id
         # 防止多轮Reducer相互污染，也便于按请求恢复和审计。
@@ -530,11 +635,11 @@ class ConversationService:
         route_payload = dict(state["route_plan"])
         route_payload["intent_decision"] = state.get("intent_decision")
         route_plan = CustomerServiceRoutePlan.model_validate(route_payload)
+        context_resolution = ContextResolution.model_validate(state["context_resolution"])
+        next_context = ConversationContextState.model_validate(state["next_conversation_context"])
         interrupt_payload = _first_interrupt_payload(raw_interrupts)
         snapshot = (
-            await self._graph.aget_state(config)
-            if self._graph_context.interrupt_enabled
-            else None
+            await self._graph.aget_state(config) if self._graph_context.interrupt_enabled else None
         )
         if interrupt_payload is not None:
             if snapshot is None:  # pragma: no cover - interrupt只会在持久化模式启用
@@ -563,6 +668,8 @@ class ConversationService:
                 ),
                 prompt_version="human_interrupt:v1",
                 execution=execution,
+                context_resolution=context_resolution,
+                next_context=next_context,
             )
         execution = GraphExecutionView(
             execution_id=execution_id,
@@ -584,6 +691,8 @@ class ConversationService:
             usage=TokenUsage.model_validate(state["usage"]),
             prompt_version=state["prompt_version"],
             execution=execution,
+            context_resolution=context_resolution,
+            next_context=next_context,
         )
 
     async def _ensure_pending_review(
@@ -738,8 +847,8 @@ class ConversationService:
         thread_id: str,
         content: str,
         request_id: str,
-    ) -> tuple[str, str, list[ChatMessage]]:
-        """保存用户消息并返回 (会话ID, 消息ID, 对话历史)。
+    ) -> tuple[str, str, list[ChatMessage], ConversationContextState]:
+        """保存用户消息并返回会话身份、历史和结构化上下文快照。
 
         历史加载优先级：Redis 缓存 → 数据库。
         保存后同步更新 Redis 缓存。
@@ -751,6 +860,21 @@ class ConversationService:
             conversations = ConversationRepository(session)
             conversation = await self._owned_conversation(session, thread_id, user.id)
             messages = MessageRepository(session)
+            cached_context = await self._cached_context(thread_id)
+            snapshot = (
+                await ConversationContextRepository(session).get(conversation.id)
+                if cached_context is None
+                else None
+            )
+            try:
+                context_state = cached_context or (
+                    ConversationContextState.model_validate(snapshot.state_json)
+                    if snapshot is not None
+                    else ConversationContextState.empty()
+                )
+            except ValueError:
+                # 损坏的派生快照不能污染路由；消息事实仍然保留并从空状态安全重建。
+                context_state = ConversationContextState.empty()
             # 优先从 Redis 缓存加载历史，减少数据库查询。
             cached_history = await self._cached_history(thread_id)
             previous = (
@@ -775,7 +899,7 @@ class ConversationService:
                 thread_id,
                 [*history, ChatMessage(role=MessageRole.USER, content=content)],
             )
-            return conversation.id, user_message.id, history
+            return conversation.id, user_message.id, history, context_state
 
     async def _persist_outcome(
         self,
@@ -791,6 +915,7 @@ class ConversationService:
         assistant_content: str | None = None,
         model: str | None = None,
         prompt_version: str | None = None,
+        context_state: ConversationContextState | None = None,
     ) -> None:
         """持久化本次请求的结果：助手消息 + ModelCall 审计记录。
 
@@ -825,7 +950,26 @@ class ConversationService:
                     error_code=error_code,
                 )
             )
+            if context_state is not None:
+                contexts = ConversationContextRepository(session)
+                snapshot = await contexts.get_for_update(conversation_id)
+                state_json = context_state.model_dump(mode="json")
+                if snapshot is None:
+                    contexts.add(
+                        ConversationContextSnapshot(
+                            conversation_id=conversation_id,
+                            version=context_state.context_version,
+                            state_json=state_json,
+                        )
+                    )
+                elif context_state.context_version >= snapshot.version:
+                    snapshot.version = context_state.context_version
+                    snapshot.state_json = state_json
             await session.commit()
+        if context_state is not None:
+            thread_id = await self._thread_id_by_conversation(conversation_id)
+            if thread_id is not None:
+                await self._store_context(thread_id, context_state)
         # 如果有助手回复，更新 Redis 缓存。
         if assistant_content:
             cached = await self._cached_history_by_conversation(conversation_id)
@@ -850,6 +994,30 @@ class ConversationService:
             return await self._history_cache.get(thread_id)
         except RedisError:
             return None
+
+    async def _cached_context(
+        self,
+        thread_id: str,
+    ) -> ConversationContextState | None:
+        try:
+            return await self._history_cache.get_context(thread_id)
+        except RedisError:
+            return None
+
+    async def _store_context(
+        self,
+        thread_id: str,
+        state: ConversationContextState,
+    ) -> None:
+        try:
+            await self._history_cache.set_context(thread_id, state)
+        except RedisError:
+            return
+
+    async def _thread_id_by_conversation(self, conversation_id: str) -> str | None:
+        async with self._database.session() as session:
+            conversation = await session.get(Conversation, conversation_id)
+            return conversation.thread_id if conversation is not None else None
 
     async def _store_history(self, thread_id: str, history: list[ChatMessage]) -> None:
         """将对话历史写入 Redis 缓存，失败时静默忽略。"""
@@ -902,6 +1070,29 @@ def _routed_operation(
 
 def _execution_id(thread_id: str, request_id: str) -> str:
     return f"{thread_id}:{request_id}"
+
+
+def _resolve_context_resolution(state: CustomerServiceGraphState) -> ContextResolution:
+    """从State安全恢复上下文解析结果；旧版Checkpoint可能缺失该字段。"""
+
+    payload = state.get("context_resolution")
+    if payload is not None:
+        return ContextResolution.model_validate(payload)
+    return ContextResolution(
+        original_query=state["normalized_question"],
+        kind=ContextResolutionKind.STANDALONE,
+        confidence=1,
+        source="none",
+    )
+
+
+def _resolve_next_context(state: CustomerServiceGraphState) -> ConversationContextState:
+    """从State安全恢复下一轮上下文；旧版Checkpoint可能缺失该字段。"""
+
+    payload = state.get("next_conversation_context")
+    if payload is not None:
+        return ConversationContextState.model_validate(payload)
+    return ConversationContextState.empty()
 
 
 def _graph_config(
@@ -957,7 +1148,7 @@ def _execution_view_from_snapshot(
     payload = _snapshot_interrupt(snapshot)
     if payload is not None:
         status = GraphExecutionStatus.INTERRUPTED
-    elif state.get("status") == GraphRunStatus.FAILED:
+    elif snapshot_has_failure(snapshot):
         status = GraphExecutionStatus.FAILED
     else:
         status = GraphExecutionStatus.COMPLETED

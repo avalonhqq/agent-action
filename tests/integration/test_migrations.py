@@ -29,9 +29,7 @@ def test_initial_migration_is_repeatable(
     with sqlite3.connect(database_path) as connection:
         tables = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
         operation_column = next(
@@ -41,9 +39,7 @@ def test_initial_migration_is_repeatable(
         )
         current_column = next(
             row
-            for row in connection.execute(
-                "PRAGMA table_info(knowledge_document_versions)"
-            )
+            for row in connection.execute("PRAGMA table_info(knowledge_document_versions)")
             if row[1] == "is_current"
         )
     reset_settings()
@@ -60,11 +56,12 @@ def test_initial_migration_is_repeatable(
         "knowledge_chunks",
         "knowledge_index_versions",
         "knowledge_index_jobs",
-            "knowledge_dictionary_terms",
-            "knowledge_dictionary_versions",
-            "graph_reviews",
-        } <= tables
-    assert revision == ("20260805_0009",)
+        "knowledge_dictionary_terms",
+        "knowledge_dictionary_versions",
+        "graph_reviews",
+        "conversation_context_snapshots",
+    } <= tables
+    assert revision == ("20260805_0010",)
     assert operation_column[2] == "VARCHAR(64)"
     assert current_column[2] == "BOOLEAN"
     assert current_column[3] == 1

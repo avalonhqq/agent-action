@@ -7,13 +7,17 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from bili_support.conversation_context import (
+    ContextResolution,
+    ConversationContextResolver,
+    ConversationContextState,
+)
 from bili_support.core.exceptions import AppError
 from bili_support.core.security import UserContext
 from bili_support.intent.types import BusinessDomain, IntentAction, IntentEntity
 from bili_support.knowledge.evidence import KnowledgeRetrievalTrace, build_knowledge_evidence
 from bili_support.knowledge.retrieval import RetrievalMode
 from bili_support.knowledge.retrieval_policy import RetrievalDecisionKind
-from bili_support.llm.context import QueryRewriteResult, StandaloneQueryRewriter
 from bili_support.llm.service import (
     ChatCompletionResult,
     ChatService,
@@ -34,15 +38,15 @@ class PolicyKnowledgeRetriever(Protocol):
     """Graph所需的策略检索最小接口，避免依赖整个services包。"""
 
     async def retrieve(
-            self,
-            *,
-            actor: UserContext,
-            question: str,
-            history: tuple[ChatMessage, ...],
-            domain: BusinessDomain,
-            actions: tuple[IntentAction, ...],
-            entities: tuple[IntentEntity, ...],
-            mode: RetrievalMode,
+        self,
+        *,
+        actor: UserContext,
+        question: str,
+        history: tuple[ChatMessage, ...],
+        domain: BusinessDomain,
+        actions: tuple[IntentAction, ...],
+        entities: tuple[IntentEntity, ...],
+        mode: RetrievalMode,
     ) -> PolicyRetrievalResult: ...
 
 
@@ -68,8 +72,8 @@ class CustomerServiceGraphContext:
     policy_retriever: PolicyKnowledgeRetriever
     chat: ChatService
     retrieval_mode: RetrievalMode
-    query_rewriter: StandaloneQueryRewriter = field(
-        default_factory=StandaloneQueryRewriter
+    context_resolver: ConversationContextResolver = field(
+        default_factory=ConversationContextResolver
     )
     # 只有真实持久化Checkpointer已启动时才允许interrupt，否则保持原确定性提示。
     interrupt_enabled: bool = False
@@ -79,22 +83,27 @@ class CustomerServiceGraphContext:
 
         return await self.router.route(question)
 
-    def rewrite(
+    async def resolve_context(
         self,
         question: str,
         history: list[ChatMessage],
-    ) -> QueryRewriteResult:
-        """在意图识别前生成可审计的独立问题，解决短省略追问。"""
+        context: ConversationContextState,
+    ) -> ContextResolution:
+        """规则优先、模型消歧，并在不确定时返回澄清。"""
 
-        return self.query_rewriter.rewrite(question, history)
+        return await self.context_resolver.resolve(
+            question=question,
+            history=history,
+            context=context,
+        )
 
     async def retrieve(
-            self,
-            *,
-            actor: UserContext,
-            question: str,
-            history: list[ChatMessage],
-            route_plan: CustomerServiceRoutePlan,
+        self,
+        *,
+        actor: UserContext,
+        question: str,
+        history: list[ChatMessage],
+        route_plan: CustomerServiceRoutePlan,
     ) -> GraphKnowledgeExecution:
         """按意图业务域执行真实Hybrid检索，并产生有界Parent证据。"""
 
@@ -129,9 +138,7 @@ class CustomerServiceGraphContext:
                     question=question,
                     domain=domain,
                     actions=tuple(
-                        item.action
-                        for item in decision.intents
-                        if item.domain is domain
+                        item.action for item in decision.intents if item.domain is domain
                     ),
                     entities=decision.entities,
                     history=tuple(history[-20:]),
@@ -144,18 +151,14 @@ class CustomerServiceGraphContext:
                 route_plan=route_plan,
                 domains=domains,
                 error_code=exc.code.value,
-                response=(
-                    "知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"
-                ),
+                response=("知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"),
             )
         except Exception:
             return self._knowledge_fallback(
                 route_plan=route_plan,
                 domains=domains,
                 error_code="knowledge_retrieval_failed",
-                response=(
-                    "知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"
-                ),
+                response=("知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"),
             )
 
         bundle = build_knowledge_evidence(results=results, mode=self.retrieval_mode)
@@ -184,8 +187,8 @@ class CustomerServiceGraphContext:
             return GraphKnowledgeExecution(
                 route_plan=updated_plan,
                 response_override=(
-                        selected.quality.clarification_question
-                        or "当前证据不完整，请补充更具体的信息。"
+                    selected.quality.clarification_question
+                    or "当前证据不完整，请补充更具体的信息。"
                 ),
             )
         return GraphKnowledgeExecution(
@@ -194,11 +197,11 @@ class CustomerServiceGraphContext:
         )
 
     async def complete_general(
-            self,
-            *,
-            request_id: str,
-            question: str,
-            history: list[ChatMessage],
+        self,
+        *,
+        request_id: str,
+        question: str,
+        history: list[ChatMessage],
     ) -> ChatCompletionResult:
         """执行现有普通回答模型链路。"""
 
@@ -209,12 +212,12 @@ class CustomerServiceGraphContext:
         )
 
     async def generate_grounded(
-            self,
-            *,
-            request_id: str,
-            question: str,
-            history: list[ChatMessage],
-            evidence_context: str,
+        self,
+        *,
+        request_id: str,
+        question: str,
+        history: list[ChatMessage],
+        evidence_context: str,
     ) -> GroundedChatCompletionResult:
         """只完成Grounded结构生成和引用白名单校验，NLI留给下一节点。"""
 
@@ -227,10 +230,10 @@ class CustomerServiceGraphContext:
         )
 
     async def verify_grounded(
-            self,
-            *,
-            result: GroundedChatCompletionResult,
-            evidence_context: str,
+        self,
+        *,
+        result: GroundedChatCompletionResult,
+        evidence_context: str,
     ) -> GroundedChatCompletionResult:
         """调用真实本地NLI校验生成结果，不进行第二次LLM改写。"""
 
@@ -240,12 +243,12 @@ class CustomerServiceGraphContext:
         )
 
     def _knowledge_fallback(
-            self,
-            *,
-            route_plan: CustomerServiceRoutePlan,
-            domains: tuple[BusinessDomain, ...],
-            error_code: str,
-            response: str,
+        self,
+        *,
+        route_plan: CustomerServiceRoutePlan,
+        domains: tuple[BusinessDomain, ...],
+        error_code: str,
+        response: str,
     ) -> GraphKnowledgeExecution:
         """检索失败时输出安全Trace，禁止无证据自由回答。"""
 

@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from bili_support.conversation_context import ContextResolution
 from bili_support.llm.types import FinishReason, TokenUsage
 from bili_support.routing import CustomerServiceRouteSummary
 
@@ -82,6 +83,54 @@ class GraphExecutionView(BaseModel):
     answer: str | None = None
 
 
+class GraphRecoveryAction(StrEnum):
+    """9D根据执行事实给出的恢复动作；不是由模型自由生成。"""
+
+    NONE = "none"  # 已完成，无需恢复
+    RESUME_REVIEW = "resume_review"  # 等待人工审核后Command.resume
+    RETRY_CHECKPOINT = "retry_checkpoint"  # 可由运营从最后成功Checkpoint重试
+    CORRECT_INPUT = "correct_input"  # 输入/策略失败，应修正后创建新请求
+    OPERATOR_INSPECT = "operator_inspect"  # 未知或永久错误，需要运营排障
+
+
+class GraphRecoveryRecommendation(BaseModel):
+    """确定性恢复建议，明确是否允许自动重试以及副作用边界。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    action: GraphRecoveryAction
+    retryable: bool
+    automatic_retry_allowed: bool
+    reason: str
+    error_code: str | None = None
+
+
+class GraphTimelineStep(BaseModel):
+    """单个Checkpoint的脱敏视图，不暴露问题、历史、证据或模型原文。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    checkpoint_id: str
+    step: int
+    source: str
+    created_at: str | None = None
+    current_node: str
+    next_nodes: tuple[str, ...] = ()
+    written_nodes: tuple[str, ...] = ()
+    failed_nodes: tuple[str, ...] = ()
+    interrupted: bool = False
+
+
+class GraphExecutionTimeline(BaseModel):
+    """9D只读流程回放和失败恢复建议。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution: GraphExecutionView
+    steps: tuple[GraphTimelineStep, ...]
+    recovery: GraphRecoveryRecommendation
+
+
 class ResumeGraphRequest(BaseModel):
     """审核人员恢复中断Graph时提交的受控命令。"""
 
@@ -116,3 +165,4 @@ class ConversationMessageResult(BaseModel):
     prompt_version: str
     routing: CustomerServiceRouteSummary
     execution: GraphExecutionView | None = None
+    context_resolution: ContextResolution | None = None

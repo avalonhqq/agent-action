@@ -14,6 +14,10 @@ from structlog import get_logger
 
 from bili_support.api.error_handlers import register_exception_handlers
 from bili_support.api.router import create_api_router
+from bili_support.conversation_context import (
+    ConversationContextResolver,
+    LLMContextResolutionModel,
+)
 from bili_support.core.cache import (
     ConversationHistoryCache,
     RedisConversationHistoryCache,
@@ -163,6 +167,15 @@ def create_app(
         model_classifier=model_intent_classifier,
         policy=HybridIntentPolicy(),
     )
+    context_resolver = ConversationContextResolver(
+        model=LLMContextResolutionModel(
+            provider=current_intent_provider,
+            model=current_settings.llm_model,
+            max_tokens=current_settings.llm_intent_max_tokens,
+            timeout_seconds=current_settings.llm_timeout_seconds,
+            parse_retries=current_settings.intent_parse_retries,
+        )
+    )
     configured_lexical_store: LexicalStore | None = (
         ElasticsearchLexicalStore(
             url=current_settings.elasticsearch_url,
@@ -286,6 +299,7 @@ def create_app(
         customer_rerank_enabled=current_settings.customer_rerank_enabled,
         rerank_candidate_k=current_settings.rerank_candidate_k,
         history_cache=current_history_cache,
+        context_resolver=context_resolver,
         review_admin_user_ids=current_settings.graph_review_admin_user_ids,
     )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
@@ -296,9 +310,7 @@ def create_app(
             checkpoint_collection=current_settings.graph_checkpoint_collection,
             writes_collection=current_settings.graph_checkpoint_writes_collection,
             ttl_seconds=current_settings.graph_checkpoint_ttl_seconds,
-            connect_timeout_seconds=(
-                current_settings.graph_checkpoint_connect_timeout_seconds
-            ),
+            connect_timeout_seconds=(current_settings.graph_checkpoint_connect_timeout_seconds),
             encryption_key=(
                 current_settings.graph_checkpoint_encryption_key.get_secret_value()
                 if current_settings.graph_checkpoint_encryption_key is not None

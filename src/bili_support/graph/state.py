@@ -61,6 +61,9 @@ class CustomerServiceGraphState(TypedDict, total=False):
     # 9B只保存可JSON序列化的数据；运行期服务连接由Graph Context注入。
     actor: NotRequired[dict[str, str]]
     history: NotRequired[list[dict[str, str]]]
+    conversation_context: NotRequired[dict[str, Any]]
+    next_conversation_context: NotRequired[dict[str, Any]]
+    context_resolution: NotRequired[dict[str, Any]]
     route_plan: NotRequired[dict[str, Any]]
     intent_decision: NotRequired[dict[str, Any] | None]
     evidence_context: NotRequired[str]
@@ -89,6 +92,9 @@ class GraphStateUpdate(TypedDict, total=False):
     normalized_question: str
     standalone_question: str
     query_rewrite: dict[str, Any]
+    conversation_context: dict[str, Any]
+    next_conversation_context: dict[str, Any]
+    context_resolution: dict[str, Any]
     next_action: GraphNextAction
     error_code: GraphErrorCode
     route_plan: dict[str, Any]
@@ -109,11 +115,11 @@ class GraphStateUpdate(TypedDict, total=False):
 
 
 def create_graph_input(
-        *,
-        request_id: str,
-        thread_id: str,
-        user_id: str,
-        question: str,
+    *,
+    request_id: str,
+    thread_id: str,
+    user_id: str,
+    question: str,
 ) -> CustomerServiceGraphState:
     """集中构造合法初始State，避免API、测试和后续Service各自补默认值。"""
 
@@ -131,13 +137,14 @@ def create_graph_input(
 
 
 def create_week9b_graph_input(
-        *,
-        request_id: str,
-        thread_id: str,
-        user_id: str,
-        display_name: str,
-        question: str,
-        history: list[dict[str, str]],
+    *,
+    request_id: str,
+    thread_id: str,
+    user_id: str,
+    display_name: str,
+    question: str,
+    history: list[dict[str, str]],
+    conversation_context: dict[str, Any] | None = None,
 ) -> CustomerServiceGraphState:
     """构造9B输入；身份与有界历史以纯JSON进入加密Checkpoint。"""
 
@@ -149,4 +156,12 @@ def create_week9b_graph_input(
     )
     state["actor"] = {"external_id": user_id, "display_name": display_name}
     state["history"] = history[-20:]
+    state["conversation_context"] = conversation_context or {
+        "primary_domain": None,
+        "active_topics": [],
+        "confirmed_entity_values": [],
+        "unresolved_slots": [],
+        "last_standalone_query": None,
+        "context_version": 0,
+    }
     return state

@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from bili_support.conversation_context import ConversationContextState
 from bili_support.core.exceptions import AppError
 from bili_support.core.security import AuthDependency, UserContext
 from bili_support.schemas.common import ApiResponse
@@ -16,6 +17,7 @@ from bili_support.schemas.conversations import (
     ConversationMessageResult,
     ConversationView,
     CreateConversationRequest,
+    GraphExecutionTimeline,
     GraphExecutionView,
     MessageView,
     PendingGraphReviewView,
@@ -86,6 +88,25 @@ def create_conversation_router(
         )
         return ApiResponse(data=execution, request_id=_request_id(request))
 
+    @router.get(
+        "/{thread_id}/executions/{execution_request_id}/timeline",
+        response_model=ApiResponse[GraphExecutionTimeline],
+    )
+    async def get_graph_execution_timeline(
+        thread_id: str,
+        execution_request_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[GraphExecutionTimeline]:
+        """返回脱敏节点时间线；不会返回Checkpoint原始State或异常文本。"""
+
+        timeline = await service.execution_timeline(
+            actor=actor,
+            thread_id=thread_id,
+            execution_request_id=execution_request_id,
+        )
+        return ApiResponse(data=timeline, request_id=_request_id(request))
+
     @router.post(
         "/{thread_id}/executions/{execution_request_id}/resume",
         response_model=ApiResponse[ConversationMessageResult],
@@ -121,6 +142,17 @@ def create_conversation_router(
             data=[MessageView.model_validate(item) for item in messages],
             request_id=_request_id(request),
         )
+
+    @router.get("/{thread_id}/context", response_model=ApiResponse[ConversationContextState])
+    async def get_conversation_context(
+        thread_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[ConversationContextState]:
+        """返回可解释的主题栈；仍执行会话所有权校验。"""
+
+        state = await service.context(actor, thread_id)
+        return ApiResponse(data=state, request_id=_request_id(request))
 
     @router.post(
         "/{thread_id}/messages",
@@ -174,6 +206,11 @@ def create_conversation_router(
                                     "execution_id": chunk.execution_id,
                                     "status": chunk.execution_status,
                                 },
+                            )
+                        if chunk.context_resolution is not None:
+                            yield _event(
+                                "context",
+                                chunk.context_resolution.model_dump(mode="json"),
                             )
                         if chunk.delta:
                             yield _event("delta", {"delta": chunk.delta})

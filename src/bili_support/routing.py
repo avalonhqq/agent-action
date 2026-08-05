@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from bili_support.conversation_context import ContextResolution
 from bili_support.core.exceptions import AppError
 from bili_support.intent.hybrid import HybridIntentClassifier
 from bili_support.intent.types import (
@@ -23,13 +24,13 @@ from bili_support.llm.types import FinishReason, TokenUsage
 class CustomerServiceTarget(StrEnum):
     """第四周可执行的客服下游；未实现模块必须在名称中明确 Mock。"""
 
-    KNOWLEDGE_RAG = "knowledge_rag"            # 真实知识检索与证据约束回答
-    GENERAL_CHAT = "general_chat"              # 闲聊对话，调用 LLM 自由回答
-    CLARIFICATION = "clarification"            # 追问澄清，缺少关键信息时触发
-    SAFETY = "safety"                          # 安全拦截，unsafe 路由命中
-    OUT_OF_SCOPE = "out_of_scope"              # 超出服务范围，out_of_domain 路由命中
+    KNOWLEDGE_RAG = "knowledge_rag"  # 真实知识检索与证据约束回答
+    GENERAL_CHAT = "general_chat"  # 闲聊对话，调用 LLM 自由回答
+    CLARIFICATION = "clarification"  # 追问澄清，缺少关键信息时触发
+    SAFETY = "safety"  # 安全拦截，unsafe 路由命中
+    OUT_OF_SCOPE = "out_of_scope"  # 超出服务范围，out_of_domain 路由命中
     HUMAN_SERVICE_MOCK = "human_service_mock"  # 转人工（Mock）
-    HUMAN_REVIEW_MOCK = "human_review_mock"    # 人工复核（Mock），高风险或分类失败时兜底
+    HUMAN_REVIEW_MOCK = "human_review_mock"  # 人工复核（Mock），高风险或分类失败时兜底
 
 
 class CustomerServiceRouteSummary(BaseModel):
@@ -37,17 +38,17 @@ class CustomerServiceRouteSummary(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    target: CustomerServiceTarget                          # 最终命中的下游目标
-    mocked_downstream: bool                                # 下游是否为 Mock 实现
-    intent_route: IntentRoute | None = None                # 意图分类的顶层路由
-    risk: RiskLevel | None = None                          # 最终风险等级（可能被策略升级）
-    needs_clarification: bool = False                      # 是否需要追问澄清
-    source: DecisionSource | None = None                   # 决策来源：rule / model / hybrid
-    rule_id: str | None = None                             # 规则命中时携带的规则编号
-    applied_policy_ids: tuple[str, ...] = ()               # 后置策略触发的策略编号列表
-    classification_error: str | None = None                # 分类失败时的错误码
-    business_domains: tuple[BusinessDomain, ...] = ()       # 知识检索使用的业务域
-    retrieval: KnowledgeRetrievalTrace | None = None        # 真实RAG检索摘要
+    target: CustomerServiceTarget  # 最终命中的下游目标
+    mocked_downstream: bool  # 下游是否为 Mock 实现
+    intent_route: IntentRoute | None = None  # 意图分类的顶层路由
+    risk: RiskLevel | None = None  # 最终风险等级（可能被策略升级）
+    needs_clarification: bool = False  # 是否需要追问澄清
+    source: DecisionSource | None = None  # 决策来源：rule / model / hybrid
+    rule_id: str | None = None  # 规则命中时携带的规则编号
+    applied_policy_ids: tuple[str, ...] = ()  # 后置策略触发的策略编号列表
+    classification_error: str | None = None  # 分类失败时的错误码
+    business_domains: tuple[BusinessDomain, ...] = ()  # 知识检索使用的业务域
+    retrieval: KnowledgeRetrievalTrace | None = None  # 真实RAG检索摘要
 
 
 class CustomerServiceRoutePlan(BaseModel):
@@ -59,18 +60,16 @@ class CustomerServiceRoutePlan(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    summary: CustomerServiceRouteSummary           # 审计路由摘要
-    use_chat_model: bool                           # 是否调用 LLM 生成回答
-    response_override: str | None = None           # 确定性回复文本，非空时跳过 LLM
+    summary: CustomerServiceRouteSummary  # 审计路由摘要
+    use_chat_model: bool  # 是否调用 LLM 生成回答
+    response_override: str | None = None  # 确定性回复文本，非空时跳过 LLM
     # 仅供服务器内部策略选择；exclude防止订单号、账号号等实体进入公开响应。
     intent_decision: IntentDecision | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def validate_execution_mode(self) -> CustomerServiceRoutePlan:
         if self.use_chat_model == (self.response_override is not None):
-            raise ValueError(
-                "route plan must select exactly one response execution mode"
-            )
+            raise ValueError("route plan must select exactly one response execution mode")
         return self
 
 
@@ -79,12 +78,13 @@ class CustomerServiceStreamChunk(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    delta: str = ""                                          # 增量文本
-    finish_reason: FinishReason | None = None                # 流结束原因
-    usage: TokenUsage | None = None                          # 本请求 Token 用量
-    routing: CustomerServiceRouteSummary | None = None       # 首帧携带的路由摘要（仅首个 chunk）
-    execution_status: str | None = None                      # 9C：completed/interrupted
-    execution_id: str | None = None                          # MongoDB Checkpoint线程键
+    delta: str = ""  # 增量文本
+    finish_reason: FinishReason | None = None  # 流结束原因
+    usage: TokenUsage | None = None  # 本请求 Token 用量
+    routing: CustomerServiceRouteSummary | None = None  # 首帧携带的路由摘要（仅首个 chunk）
+    execution_status: str | None = None  # 9C：completed/interrupted
+    execution_id: str | None = None  # MongoDB Checkpoint线程键
+    context_resolution: ContextResolution | None = None  # 跨轮主题消解结果
 
 
 class CustomerServiceRouter:
@@ -280,7 +280,6 @@ class CustomerServiceRouter:
 def _requests_human_service(decision: IntentDecision) -> bool:
     """检查子意图中是否包含明确的人工客服转接请求。"""
     return any(
-        intent.domain is BusinessDomain.HUMAN_SERVICE
-        and intent.action is IntentAction.TRANSFER
+        intent.domain is BusinessDomain.HUMAN_SERVICE and intent.action is IntentAction.TRANSFER
         for intent in decision.intents
     )

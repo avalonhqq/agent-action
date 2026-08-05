@@ -1,8 +1,8 @@
 # 当前学习入口
 
-前八周已经完成，第9周9A、9B与9C已完成：最小Graph、MongoDB Checkpoint、真实Intent、Hybrid RAG、
-Grounded Answer、本地NLI、人工中断、审核队列与断点恢复已经进入同一条状态化工作流。当前下一步为9D流程
-回放、失败恢复策略与第9周复盘；实施前先讲思路并等待确认。
+前九周已经完成：最小Graph、真实Intent、Hybrid RAG、Grounded Answer、本地NLI、MongoDB Checkpoint、
+人工中断恢复、多轮上下文、安全流程回放与失败恢复策略已经进入同一条状态化工作流。当前下一步为第10周
+Supervisor、多Agent与工具调用；实施前先讲思路并等待确认。
 
 第7周补充完成统一企业客服工作台：`/support/`现已覆盖问答、知识上传、领域词条、审核发布、
 版本制品和能力边界展示。

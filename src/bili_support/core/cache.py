@@ -8,6 +8,7 @@ from typing import Protocol, cast
 
 from redis.asyncio import Redis
 
+from bili_support.conversation_context import ConversationContextState
 from bili_support.llm.types import ChatMessage, MessageRole
 
 
@@ -16,12 +17,30 @@ class ConversationHistoryCache(Protocol):
 
     async def set(self, thread_id: str, messages: Sequence[ChatMessage]) -> None: ...
 
+    async def get_context(self, thread_id: str) -> ConversationContextState | None: ...
+
+    async def set_context(
+        self,
+        thread_id: str,
+        state: ConversationContextState,
+    ) -> None: ...
+
 
 class NullConversationHistoryCache:
     async def get(self, thread_id: str) -> list[ChatMessage] | None:
         return None
 
     async def set(self, thread_id: str, messages: Sequence[ChatMessage]) -> None:
+        return None
+
+    async def get_context(self, thread_id: str) -> ConversationContextState | None:
+        return None
+
+    async def set_context(
+        self,
+        thread_id: str,
+        state: ConversationContextState,
+    ) -> None:
         return None
 
 
@@ -72,6 +91,26 @@ class RedisConversationHistoryCache:
             ex=self._ttl_seconds,
         )
 
+    async def get_context(self, thread_id: str) -> ConversationContextState | None:
+        raw = await self._redis.get(self._context_key(thread_id))
+        if raw is None:
+            return None
+        try:
+            return ConversationContextState.model_validate_json(raw)
+        except ValueError:
+            return None
+
+    async def set_context(
+        self,
+        thread_id: str,
+        state: ConversationContextState,
+    ) -> None:
+        await self._redis.set(
+            self._context_key(thread_id),
+            state.model_dump_json(),
+            ex=self._ttl_seconds,
+        )
+
     async def aclose(self) -> None:
         if self._owns_client:
             await self._redis.aclose()
@@ -79,3 +118,7 @@ class RedisConversationHistoryCache:
     @staticmethod
     def _key(thread_id: str) -> str:
         return f"bili-support:conversation:{thread_id}:history"
+
+    @staticmethod
+    def _context_key(thread_id: str) -> str:
+        return f"bili-support:conversation:{thread_id}:context"
