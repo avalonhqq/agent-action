@@ -107,6 +107,8 @@
 | 8C | RAG Evaluation | 已完成 | 6类固定集、Faithfulness、Relevancy、Citation指标和报告 |
 | 8D | 产品接入与复盘 | 已完成 | v4 Chat、最小直接引用、DeepSeek兼容重试和分层验证降级 |
 | 9A | 最小LangGraph与Checkpoint底座 | 已完成 | 类型化State、条件边、有限循环、MongoDB Replica Set、AES/TTL、跨Saver恢复 |
+| 9B | 真实客服能力Graph化 | 已完成 | Intent、Hybrid RAG、Grounded生成、本地NLI、会话API与SSE统一接线 |
+| 9C | 人工中断与断点恢复 | 已完成 | MongoDB interrupt/resume、MySQL审核事实、原子领取、恢复API与流程审核页 |
 
 ## 每周复盘模板
 

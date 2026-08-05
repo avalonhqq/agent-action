@@ -6,8 +6,9 @@
 
 ## 项目状态
 
-前七周已经完成，Milvus 向量检索与 Elasticsearch BM25 已接入：项目具备工程基线、
-可替换的 LLM 调用链路、可持久化的多用户客服会话，以及可追溯、可版本化的文档解析能力。
+前八周及第9周9C已经完成，Milvus、Elasticsearch、本地NLI和LangGraph MongoDB Checkpoint已接入：
+项目具备工程基线、可替换的LLM调用链路、状态化客服工作流、可持久化多用户会话，以及可追溯、
+可版本化的文档解析能力。
 
 - 已建立标准 `src/bili_support` 工程骨架。
 - 已实现类型化配置、应用工厂、健康/就绪探针、统一错误响应、Request ID 和结构化日志。
@@ -16,6 +17,8 @@
 - 已实现 SQLAlchemy 2 异步数据层、Alembic 迁移、用户/会话/消息/模型调用、简单鉴权、持久化 SSE 和 NiceGUI 页面。
 - 已实现 PDF、DOCX、Markdown、TXT 统一 Loader、SHA-256 幂等、文档版本、解析任务和结构块持久化。
 - 已实现 `EmbeddingProvider`、Milvus HNSW/COSINE、Elasticsearch 中文BM25、RRF和可降级检索。
+- 已把真实Intent、Hybrid RAG、Grounded Answer和本地NLI接入LangGraph，并使用MongoDB加密Checkpoint恢复。
+- 高风险流程支持真实`interrupt/resume`，运营审核事实写入MySQL，统一工作台可批准或拒绝后恢复原执行。
 - Agent、业务工具与证据校验会按周逐步实现。
 - 课程采用“大模型核心学习 + 工程底座自动完成”模式：重点讲解并实验 Prompt、RAG、意图、Agent、安全和评估；CRUD、迁移、鉴权、页面与部署由 Codex 自动实现并通过门禁。
 
@@ -666,6 +669,8 @@ BILI_SUPPORT_LLM_PROVIDER=openai_compatible
 BILI_SUPPORT_LLM_BASE_URL=https://api.openai.com/v1
 BILI_SUPPORT_LLM_MODEL=<你的模型名>
 BILI_SUPPORT_LLM_API_KEY=<你的本地密钥>
+BILI_SUPPORT_LLM_INTENT_MAX_TOKENS=1024
+BILI_SUPPORT_LLM_GROUNDED_MAX_TOKENS=2048
 ```
 
 兼容服务必须实现 Chat Completions 风格的 `/chat/completions` 普通和 SSE 响应。默认 Mock 是学习、测试和离线演示的推荐方式。
@@ -687,6 +692,7 @@ http://127.0.0.1:8010/support/
 | 知识入库 | 上传PDF/DOCX/Markdown/TXT并查看数据库文档 |
 | 领域词条 | 创建带业务域、类型、别名、词频和来源的candidate |
 | 审核发布 | 批准/拒绝候选、发布词典版本、查看Jieba制品 |
+| 流程审核 | 查看Graph中断待办、批准/拒绝并从MongoDB断点恢复 |
 | 能力说明 | 区分真实链路与人工坐席、客服日志等Mock能力 |
 
 打开顶部“连接身份”填写本地Bearer Token和用户信息。领域词条页面的“写入候选词”会直接写入
@@ -729,6 +735,8 @@ BILI_SUPPORT_LLM_API_KEY=你的本地密钥
 BILI_SUPPORT_LLM_TEMPERATURE=0.0
 BILI_SUPPORT_LLM_STRUCTURED_OUTPUT_MODE=json_schema
 BILI_SUPPORT_INTENT_PROMPT_VERSION=3
+BILI_SUPPORT_LLM_INTENT_MAX_TOKENS=1024
+BILI_SUPPORT_LLM_GROUNDED_MAX_TOKENS=2048
 ```
 
 重启服务并刷新 `/support/` 后，页面会显示 `Provider: openai_compatible` 和配置的模型名。

@@ -25,7 +25,6 @@ from bili_support.core.logging import configure_logging
 from bili_support.core.request_context import RequestContextMiddleware
 from bili_support.core.security import create_auth_dependency
 from bili_support.graph.checkpoints import MongoGraphCheckpointStore
-from bili_support.graph.workflow import build_week9a_graph
 from bili_support.intent.classifier import IntentClassifier
 from bili_support.intent.factory import build_intent_provider
 from bili_support.intent.hybrid import HybridIntentClassifier
@@ -143,6 +142,7 @@ def create_app(
         rewriter=StandaloneQueryRewriter(),
         temperature=current_settings.llm_temperature,
         max_tokens=current_settings.llm_max_tokens,
+        grounded_max_tokens=current_settings.llm_grounded_max_tokens,
         timeout_seconds=current_settings.llm_timeout_seconds,
         grounded_parse_retries=current_settings.grounded_parse_retries,
         claim_verifier=current_claim_verifier,
@@ -154,7 +154,7 @@ def create_app(
         model=current_settings.llm_model,
         prompt_version=current_settings.intent_prompt_version,
         temperature=current_settings.llm_temperature,
-        max_tokens=current_settings.llm_max_tokens,
+        max_tokens=current_settings.llm_intent_max_tokens,
         timeout_seconds=current_settings.llm_timeout_seconds,
         parse_retries=current_settings.intent_parse_retries,
     )
@@ -286,6 +286,7 @@ def create_app(
         customer_rerank_enabled=current_settings.customer_rerank_enabled,
         rerank_candidate_k=current_settings.rerank_candidate_k,
         history_cache=current_history_cache,
+        review_admin_user_ids=current_settings.graph_review_admin_user_ids,
     )
     authenticate = create_auth_dependency(current_settings.api_token.get_secret_value())
     current_checkpoint_store = checkpoint_store or (
@@ -324,14 +325,12 @@ def create_app(
                     error_type=type(exc).__name__,
                 )
         # 只有真实MongoDB已通过启动探测时才注入Saver，不以MemorySaver伪装持久化。
-        application.state.customer_service_graph = build_week9a_graph(
-            checkpointer=(
-                current_checkpoint_store.saver
-                if current_checkpoint_store is not None
-                and current_checkpoint_store.started
-                else None
-            )
+        conversation_service.configure_graph_checkpoint(
+            current_checkpoint_store.saver
+            if current_checkpoint_store is not None and current_checkpoint_store.started
+            else None
         )
+        application.state.customer_service_graph = conversation_service.graph
         # 生产模式在接流量前完成NLI加载；失败直接阻止实例进入Ready，而非请求时降级Mock。
         if current_settings.claim_verification_warmup and isinstance(
             current_claim_verifier, TransformersNliClaimVerifier
@@ -404,8 +403,8 @@ def create_app(
     application.state.lexical_store = current_lexical_store
     application.state.lexical_sync_service = lexical_sync_service
     application.state.checkpoint_store = current_checkpoint_store
-    # lifespan启动后会用真实MongoDB Saver重新编译；启动前仅用于结构检查。
-    application.state.customer_service_graph = build_week9a_graph()
+    # lifespan启动后会用真实MongoDB Saver重新编译；关闭Checkpoint时仍执行相同9B Graph。
+    application.state.customer_service_graph = conversation_service.graph
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

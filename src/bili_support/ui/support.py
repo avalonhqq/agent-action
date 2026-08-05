@@ -116,6 +116,7 @@ def register_support_ui(
             knowledge_tab = ui.tab("知识入库", icon="upload_file")
             terms_tab = ui.tab("领域词条", icon="library_books")
             review_tab = ui.tab("审核发布", icon="fact_check")
+            workflow_tab = ui.tab("流程审核", icon="approval")
             status_tab = ui.tab("能力说明", icon="account_tree")
 
         with ui.column().classes("w-full max-w-7xl mx-auto px-5 py-4 gap-4"):
@@ -168,6 +169,13 @@ def register_support_ui(
                                 "verified",
                                 "真实状态机",
                                 review_tab,
+                            ),
+                            (
+                                "客服流程审核",
+                                "查看中断任务，批准或拒绝并从MongoDB断点恢复",
+                                "approval",
+                                "真实可恢复流程",
+                                workflow_tab,
                             ),
                             (
                                 "能力与边界",
@@ -362,6 +370,25 @@ def register_support_ui(
                                 .props("readonly autogrow")
                                 .classes("w-full")
                             )
+
+                with ui.tab_panel(workflow_tab):
+                    _section_heading(
+                        "客服流程人工审核",
+                        "高风险或需人工确认的Graph会暂停；审核决定写入MySQL，并从MongoDB原断点恢复。",
+                    )
+                    with ui.row().classes("w-full items-end gap-4"):
+                        workflow_review_note = ui.input(
+                            "处理意见", value="已核验用户诉求和风险，允许继续"
+                        ).classes("grow")
+                        refresh_workflow_reviews_button = ui.button(
+                            "刷新待办", icon="refresh"
+                        )
+                    workflow_review_list = ui.column().classes("w-full gap-3")
+                    with workflow_review_list:
+                        ui.label("点击“刷新待办”读取Graph审核队列。")
+                    with ui.card().classes("w-full workbench-card"):
+                        ui.label("最近一次恢复结果").classes("text-subtitle1 font-bold")
+                        workflow_result = ui.markdown("尚未执行恢复。")
 
                 with ui.tab_panel(status_tab):
                     _render_capabilities(intent_provider_name=intent_provider_name)
@@ -655,6 +682,81 @@ def register_support_ui(
             )
             artifact_preview.value = artifact.artifact_content
 
+        async def refresh_workflow_reviews() -> None:
+            """从MySQL读取运营待办；Graph完整状态不会直接暴露到列表。"""
+
+            try:
+                pending = await service.list_pending_reviews(actor())
+            except AppError as exc:
+                ui.notify(exc.message, type="negative")
+                return
+            workflow_review_list.clear()
+            with workflow_review_list:
+                if not pending:
+                    ui.label("当前没有待处理的Graph审核任务。").classes("text-grey-6")
+                for item in pending:
+                    with ui.card().classes("w-full workbench-card"):
+                        with ui.row().classes("w-full items-start justify-between"):
+                            with ui.column().classes("gap-1 grow"):
+                                ui.label(item.target).classes("text-subtitle1 font-bold")
+                                ui.label(item.reason).classes("text-body2")
+                                ui.label(
+                                    f"Thread: {item.thread_id} · 请求: {item.request_id}"
+                                ).classes("text-caption text-grey-7")
+                            with ui.row().classes("gap-2"):
+                                ui.button(
+                                    "批准并恢复",
+                                    icon="play_arrow",
+                                    color="positive",
+                                    on_click=lambda _, review=item: resume_workflow(
+                                        review.thread_id,
+                                        review.request_id,
+                                        True,
+                                    ),
+                                )
+                                ui.button(
+                                    "拒绝并终止",
+                                    icon="block",
+                                    color="negative",
+                                    on_click=lambda _, review=item: resume_workflow(
+                                        review.thread_id,
+                                        review.request_id,
+                                        False,
+                                    ),
+                                ).props("outline")
+
+        async def resume_workflow(
+            thread_id: str,
+            execution_request_id: str,
+            approved: bool,
+        ) -> None:
+            """提交受控审核命令；Service负责原子领取与Checkpoint恢复。"""
+
+            note = (workflow_review_note.value or "").strip()
+            if not note:
+                ui.notify("请输入处理意见", type="warning")
+                return
+            try:
+                result = await service.resume_execution(
+                    actor=actor(),
+                    thread_id=thread_id,
+                    execution_request_id=execution_request_id,
+                    request_id=f"ui-review-{uuid4()}",
+                    decision="approve" if approved else "reject",
+                    note=note,
+                )
+            except AppError as exc:
+                ui.notify(exc.message, type="negative")
+                return
+            execution = result.execution
+            workflow_result.set_content(
+                f"**状态：** {execution.status.value if execution else 'unknown'}  \n"
+                f"**审核结果：** {'批准' if approved else '拒绝'}  \n"
+                f"**回答：** {result.answer}"
+            )
+            ui.notify("Graph已从断点恢复", type="positive")
+            await refresh_workflow_reviews()
+
         create_button.on_click(create_conversation)
         send_button.on_click(send)
         intent_button.on_click(classify_intent)
@@ -667,6 +769,7 @@ def register_support_ui(
         publish_button.on_click(publish_dictionary)
         refresh_versions_button.on_click(refresh_versions)
         artifact_button.on_click(show_active_artifact)
+        refresh_workflow_reviews_button.on_click(refresh_workflow_reviews)
 
     ui.run_with(
         fastapi_app,
@@ -718,6 +821,11 @@ def _render_capabilities(*, intent_provider_name: str) -> None:
         ("混合检索", "真实", "Jieba BM25、Milvus Vector、RRF和Small-to-Big"),
         ("回答门禁", "真实", "策略v2、实体覆盖、一次补检索、拒答和澄清"),
         ("领域词典", "真实", "候选、审核、版本、SHA-256制品和回滚边界"),
+        (
+            "Graph人工审核",
+            "真实",
+            "MongoDB Checkpoint、interrupt/resume、MySQL审核事实和并发领取",
+        ),
         ("客服日志来源", "Mock", "只模拟候选输入，不读取真实用户日志"),
         ("人工坐席", "Mock", "只显示路由结果，不连接真实工单或坐席平台"),
     )

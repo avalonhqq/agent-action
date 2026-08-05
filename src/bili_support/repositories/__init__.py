@@ -7,6 +7,7 @@ from bili_support.repositories.conversations import (
     UserRepository,
 )
 from bili_support.repositories.dictionary import KnowledgeDictionaryRepository
+from bili_support.repositories.graph_reviews import GraphReviewRepository
 from bili_support.repositories.knowledge import KnowledgeRepository
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "KnowledgeRepository",
     "KnowledgeDictionaryRepository",
     "UserRepository",
+    "GraphReviewRepository",
 ]

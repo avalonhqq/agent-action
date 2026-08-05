@@ -8,6 +8,7 @@ from bili_support.graph import (
     GraphInputStatus,
     GraphNextAction,
     GraphRunStatus,
+    build_week9b_graph,
     create_graph_input,
     run_week9a_graph,
 )
@@ -95,3 +96,18 @@ async def test_runtime_recursion_limit_must_be_positive() -> None:
 
     with pytest.raises(ValueError, match="recursion_limit must be positive"):
         await run_week9a_graph(state, recursion_limit=0)
+
+
+def test_week9b_graph_contains_real_customer_service_stages() -> None:
+    graph = build_week9b_graph()
+    nodes = set(graph.get_graph().nodes)
+
+    assert {
+        "classify_intent",
+        "retrieve_knowledge",
+        "generate_grounded",
+        "verify_claims",
+        "general_chat",
+        "deterministic_response",
+        "finalize",
+    } <= nodes

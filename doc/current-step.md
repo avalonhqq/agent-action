@@ -1,8 +1,8 @@
 # 当前学习入口
 
-前八周已经完成，第9周9A最小LangGraph及生产Checkpoint存储底座已完成：类型化State、Reducer、异步Node、
-Conditional Edge、双层循环保护、MongoDB Replica Set、AES加密、TTL和跨Saver恢复均已落地。当前下一步为
-9B，把真实Intent、RAG、Grounded Answer和本地NLI按节点接入Graph；实施前先讲思路并等待确认。
+前八周已经完成，第9周9A、9B与9C已完成：最小Graph、MongoDB Checkpoint、真实Intent、Hybrid RAG、
+Grounded Answer、本地NLI、人工中断、审核队列与断点恢复已经进入同一条状态化工作流。当前下一步为9D流程
+回放、失败恢复策略与第9周复盘；实施前先讲思路并等待确认。
 
 第7周补充完成统一企业客服工作台：`/support/`现已覆盖问答、知识上传、领域词条、审核发布、
 版本制品和能力边界展示。

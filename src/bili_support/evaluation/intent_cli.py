@@ -84,7 +84,7 @@ def build_evaluation_adapters(
             model=settings.llm_model,
             prompt_version=prompt_version,
             temperature=0.0,
-            max_tokens=settings.llm_max_tokens,
+            max_tokens=settings.llm_intent_max_tokens,
             timeout_seconds=settings.llm_timeout_seconds,
             parse_retries=settings.intent_parse_retries,
         )

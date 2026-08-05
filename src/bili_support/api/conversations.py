@@ -16,7 +16,10 @@ from bili_support.schemas.conversations import (
     ConversationMessageResult,
     ConversationView,
     CreateConversationRequest,
+    GraphExecutionView,
     MessageView,
+    PendingGraphReviewView,
+    ResumeGraphRequest,
     SendMessageRequest,
 )
 from bili_support.services.conversations import ConversationService
@@ -50,6 +53,62 @@ def create_conversation_router(
             data=[ConversationView.model_validate(item) for item in conversations],
             request_id=_request_id(request),
         )
+
+    @router.get(
+        "/reviews/pending",
+        response_model=ApiResponse[list[PendingGraphReviewView]],
+    )
+    async def list_pending_reviews(
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[list[PendingGraphReviewView]]:
+        """运营审核队列；普通用户不能读取其他用户的待审核请求。"""
+
+        reviews = await service.list_pending_reviews(actor)
+        return ApiResponse(data=reviews, request_id=_request_id(request))
+
+    @router.get(
+        "/{thread_id}/executions/{execution_request_id}",
+        response_model=ApiResponse[GraphExecutionView],
+    )
+    async def get_graph_execution(
+        thread_id: str,
+        execution_request_id: str,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[GraphExecutionView]:
+        """读取MongoDB Checkpoint对应的安全执行视图。"""
+
+        execution = await service.execution(
+            actor=actor,
+            thread_id=thread_id,
+            execution_request_id=execution_request_id,
+        )
+        return ApiResponse(data=execution, request_id=_request_id(request))
+
+    @router.post(
+        "/{thread_id}/executions/{execution_request_id}/resume",
+        response_model=ApiResponse[ConversationMessageResult],
+    )
+    async def resume_graph_execution(
+        thread_id: str,
+        execution_request_id: str,
+        payload: ResumeGraphRequest,
+        request: Request,
+        actor: Annotated[UserContext, Depends(authenticate)],
+    ) -> ApiResponse[ConversationMessageResult]:
+        """用人工决定恢复原Graph；HTTP请求ID单独用于恢复动作审计。"""
+
+        request_id = _request_id(request)
+        result = await service.resume_execution(
+            actor=actor,
+            thread_id=thread_id,
+            execution_request_id=execution_request_id,
+            request_id=request_id,
+            decision=payload.decision,
+            note=payload.note,
+        )
+        return ApiResponse(data=result, request_id=request_id)
 
     @router.get("/{thread_id}/messages", response_model=ApiResponse[list[MessageView]])
     async def list_messages(
@@ -107,6 +166,14 @@ def create_conversation_router(
                             yield _event(
                                 "route",
                                 chunk.routing.model_dump(mode="json"),
+                            )
+                        if chunk.execution_status is not None:
+                            yield _event(
+                                "execution",
+                                {
+                                    "execution_id": chunk.execution_id,
+                                    "status": chunk.execution_status,
+                                },
                             )
                         if chunk.delta:
                             yield _event("delta", {"delta": chunk.delta})

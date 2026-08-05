@@ -21,10 +21,16 @@ from bili_support.llm import (
 
 
 class _CapturingProvider:
-    def __init__(self, response_content: str | list[str]) -> None:
+    def __init__(
+        self,
+        response_content: str | list[str],
+        *,
+        finish_reasons: list[FinishReason] | None = None,
+    ) -> None:
         self.response_contents = (
             response_content if isinstance(response_content, list) else [response_content]
         )
+        self.finish_reasons = finish_reasons or [FinishReason.STOP]
         self.requests: list[LLMRequest] = []
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -33,7 +39,9 @@ class _CapturingProvider:
         return LLMResponse(
             content=self.response_contents[response_index],
             model=request.model,
-            finish_reason=FinishReason.STOP,
+            finish_reason=self.finish_reasons[
+                min(response_index, len(self.finish_reasons) - 1)
+            ],
             usage=TokenUsage(
                 prompt_tokens=10,
                 completion_tokens=5,
@@ -124,6 +132,36 @@ async def test_classifier_retries_once_and_recovers_schema_failure() -> None:
     assert len(provider.requests) == 2
     assert "上一次生成未通过结构校验" in provider.requests[1].messages[0].content
     assert "上一次生成未通过结构校验" not in provider.requests[0].messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_classifier_retries_truncated_json_with_specific_reason() -> None:
+    provider = _CapturingProvider(
+        ['{"route":"supported"', _valid_decision_json()],
+        finish_reasons=[FinishReason.LENGTH, FinishReason.STOP],
+    )
+
+    result = await _classifier(provider).classify("大会员多久生效？")
+
+    assert result.value is not None
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_classifier_reports_truncation_after_retry_budget_exhausted() -> None:
+    provider = _CapturingProvider(
+        '{"route":"supported"',
+        finish_reasons=[FinishReason.LENGTH],
+    )
+
+    result = await IntentClassifier(
+        provider=provider,
+        prompt_registry=create_default_prompt_registry(),
+        model="intent-test-model",
+        parse_retries=0,
+    ).classify("大会员多久生效？")
+
+    assert result.error_code is StructuredOutputError.TRUNCATED_RESPONSE
 
 
 @pytest.mark.asyncio

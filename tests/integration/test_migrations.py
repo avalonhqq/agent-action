@@ -60,10 +60,11 @@ def test_initial_migration_is_repeatable(
         "knowledge_chunks",
         "knowledge_index_versions",
         "knowledge_index_jobs",
-        "knowledge_dictionary_terms",
-        "knowledge_dictionary_versions",
-    } <= tables
-    assert revision == ("20260802_0008",)
+            "knowledge_dictionary_terms",
+            "knowledge_dictionary_versions",
+            "graph_reviews",
+        } <= tables
+    assert revision == ("20260805_0009",)
     assert operation_column[2] == "VARCHAR(64)"
     assert current_column[2] == "BOOLEAN"
     assert current_column[3] == 1

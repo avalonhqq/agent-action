@@ -97,8 +97,14 @@ async def test_grounded_v2_is_parsed_and_verified_before_publish() -> None:
 class _GroundedSequenceProvider:
     """先返回损坏结构、再返回合法Grounded对象，验证专用格式重试。"""
 
-    def __init__(self, responses: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        responses: tuple[str, ...],
+        *,
+        finish_reasons: tuple[FinishReason, ...] | None = None,
+    ) -> None:
         self._responses = responses
+        self._finish_reasons = finish_reasons or (FinishReason.STOP,)
         self.requests: list[LLMRequest] = []
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -107,7 +113,9 @@ class _GroundedSequenceProvider:
         return LLMResponse(
             content=content,
             model="sequence-model",
-            finish_reason=FinishReason.STOP,
+            finish_reason=self._finish_reasons[
+                min(len(self.requests) - 1, len(self._finish_reasons) - 1)
+            ],
             usage=TokenUsage(
                 prompt_tokens=10,
                 completion_tokens=5,
@@ -154,6 +162,40 @@ async def test_grounded_structure_failure_retries_once_without_failed_raw_text()
     repair_system = provider.requests[1].messages[0].content
     assert "上一次生成未通过JSON结构校验" in repair_system
     assert "不是JSON的失败原文" not in repair_system
+
+
+@pytest.mark.asyncio
+async def test_grounded_uses_dedicated_budget_and_retries_truncation() -> None:
+    valid = (
+        '{"answer":"支付成功后立即生效[E1]。","claims":['
+        '{"text":"支付成功后立即生效。","evidence_ids":["E1"]}],'
+        '"used_evidence_ids":["E1"],"completeness":"complete"}'
+    )
+    provider = _GroundedSequenceProvider(
+        ('{"answer":"被截断', valid),
+        finish_reasons=(FinishReason.LENGTH, FinishReason.STOP),
+    )
+    service = ChatService(
+        provider=provider,
+        model="reasoning-model",
+        prompt_registry=create_default_prompt_registry(),
+        usage_recorder=InMemoryUsageRecorder(),
+        max_tokens=512,
+        grounded_max_tokens=2048,
+    )
+
+    result = await service.complete_grounded(
+        request_id="request-grounded-length",
+        user_message="多久生效？",
+        history=[],
+        evidence_context=(
+            '{"evidence":[{"evidence_id":"E1",'
+            '"content":"支付成功后立即生效。"}]}'
+        ),
+    )
+
+    assert result.grounded_answer is not None
+    assert [request.max_tokens for request in provider.requests] == [2048, 2048]
 
 
 @pytest.mark.asyncio

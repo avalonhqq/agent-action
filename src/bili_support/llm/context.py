@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
@@ -11,6 +12,7 @@ from bili_support.llm.types import ChatMessage, MessageRole
 
 class RewriteReason(StrEnum):
     ENTITY_SUBSTITUTION = "entity_substitution"
+    CONTEXT_TOPIC_COMPLETION = "context_topic_completion"
     UNCHANGED_SUFFICIENT = "unchanged_sufficient"
     UNCHANGED_UNSAFE = "unchanged_unsafe"
 
@@ -40,6 +42,27 @@ class StandaloneQueryRewriter:
     """Resolve only high-confidence carrier substitutions; otherwise preserve input."""
 
     _entities = ("移动", "联通", "电信")
+    # 按更具体的词优先，避免“大会员”被较短的“会员”覆盖。
+    _support_topics = (
+        "大会员",
+        "自动续费",
+        "会员",
+        "订单",
+        "账号",
+        "创作激励",
+        "稿件",
+        "视频",
+        "评论",
+        "弹幕",
+        "直播",
+        "客户端",
+        "电视端",
+    )
+    _elliptical_follow_up = re.compile(
+        r"^(?:这个|它|那)?(?:多少钱|什么价格|价格(?:呢|是多少)?|怎么收费|"
+        r"多久(?:生效)?|什么时候生效|能做什么|有什么用|权益(?:呢|有哪些)?|"
+        r"怎么取消|能退款吗|可以退款吗)[？?。！!]*$"
+    )
 
     def rewrite(self, query: str, history: list[ChatMessage]) -> QueryRewriteResult:
         normalized = query.strip()
@@ -56,6 +79,17 @@ class StandaloneQueryRewriter:
                     standalone_query=previous.replace(old_entity, new_entity),
                     rewritten=True,
                     reason=RewriteReason.ENTITY_SUBSTITUTION,
+                )
+
+        # 仅补全白名单中的短省略问句；不让模型或任意历史文本自由改写当前意图。
+        if previous and self._elliptical_follow_up.fullmatch(normalized):
+            topic = next((item for item in self._support_topics if item in previous), None)
+            if topic is not None and topic not in normalized:
+                return QueryRewriteResult(
+                    original_query=normalized,
+                    standalone_query=f"{topic}{normalized}",
+                    rewritten=True,
+                    reason=RewriteReason.CONTEXT_TOPIC_COMPLETION,
                 )
 
         reason = (

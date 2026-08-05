@@ -4,38 +4,44 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
+from typing import cast
 
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.types import Command, StateSnapshot
 from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bili_support.core.cache import ConversationHistoryCache, NullConversationHistoryCache
 from bili_support.core.database import Database
-from bili_support.core.exceptions import AppError, ResourceNotFoundError
+from bili_support.core.exceptions import (
+    AppError,
+    ConflictError,
+    ForbiddenError,
+    ResourceNotFoundError,
+)
 from bili_support.core.security import UserContext
-from bili_support.intent.types import BusinessDomain
-from bili_support.knowledge.claim_verification import (
-    ClaimSupportStatus,
-    GroundedVerificationDecision,
-    VerificationMode,
+from bili_support.graph.context import CustomerServiceGraphContext
+from bili_support.graph.state import (
+    CustomerServiceGraphState,
+    GraphRunStatus,
+    create_week9b_graph_input,
 )
-from bili_support.knowledge.evidence import (
-    KnowledgeRetrievalTrace,
-    build_knowledge_evidence,
-)
+from bili_support.graph.workflow import MAX_GRAPH_STEPS, Week9BGraph, build_week9b_graph
 from bili_support.knowledge.retrieval import RetrievalMode
-from bili_support.knowledge.retrieval_policy import RetrievalDecisionKind
-from bili_support.llm.service import ChatService, GroundedChatCompletionResult
+from bili_support.llm.service import ChatService
 from bili_support.llm.types import (
     ChatMessage,
     FinishReason,
     MessageRole,
     TokenUsage,
 )
-from bili_support.models.entities import Conversation, Message, ModelCall
+from bili_support.models.entities import Conversation, GraphReview, Message, ModelCall
 from bili_support.repositories import (
     ConversationRepository,
+    GraphReviewRepository,
     MessageRepository,
     ModelCallRepository,
     UserRepository,
@@ -44,23 +50,30 @@ from bili_support.routing import (
     CustomerServiceRoutePlan,
     CustomerServiceRouter,
     CustomerServiceStreamChunk,
-    CustomerServiceTarget,
 )
-from bili_support.schemas.conversations import ConversationMessageResult
+from bili_support.schemas.conversations import (
+    ConversationMessageResult,
+    GraphExecutionStatus,
+    GraphExecutionView,
+    PendingGraphReviewView,
+)
 from bili_support.services.policy_retrieval import (
     PolicyAwareKnowledgeRetriever,
-    PolicyRetrievalResult,
 )
 from bili_support.services.retrieval import KnowledgeRetrievalService
 
 
 @dataclass(frozen=True, slots=True)
-class _KnowledgeExecution:
-    """一次路由完成后的知识执行准备；非知识路由保持三个默认值。"""
+class _GraphExecutionOutcome:
+    """9B Graph返回给事务层的完整、已验证响应契约。"""
 
     route_plan: CustomerServiceRoutePlan
-    evidence_context: str | None = None
-    response_override: str | None = None
+    answer: str
+    model: str
+    finish_reason: FinishReason
+    usage: TokenUsage
+    prompt_version: str
+    execution: GraphExecutionView
 
 
 class ConversationService:
@@ -81,19 +94,46 @@ class ConversationService:
         customer_rerank_enabled: bool = False,
         rerank_candidate_k: int = 10,
         history_cache: ConversationHistoryCache | None = None,
+        review_admin_user_ids: str = "review-admin",
     ) -> None:
         if not 1 <= rerank_candidate_k <= 20:
             raise ValueError("rerank_candidate_k must be between 1 and 20")
         self._database = database
         self._chat = chat_service
-        self._router = router
-        self._customer_retrieval_mode = customer_retrieval_mode
-        self._policy_retrieval = policy_retrieval_service or PolicyAwareKnowledgeRetriever(
+        policy_retriever = policy_retrieval_service or PolicyAwareKnowledgeRetriever(
             knowledge_retrieval_service,
             customer_rerank_enabled=customer_rerank_enabled,
         )
         # 未提供缓存时使用空实现，避免到处判 None。
         self._history_cache = history_cache or NullConversationHistoryCache()
+        self._graph_context = CustomerServiceGraphContext(
+            router=router,
+            policy_retriever=policy_retriever,
+            chat=chat_service,
+            retrieval_mode=customer_retrieval_mode,
+        )
+        self._graph: Week9BGraph = build_week9b_graph()
+        self._review_admin_user_ids = frozenset(
+            item.strip() for item in review_admin_user_ids.split(",") if item.strip()
+        )
+
+    @property
+    def graph(self) -> Week9BGraph:
+        """返回当前已编译Graph，供应用调试页与状态查询复用。"""
+
+        return self._graph
+
+    def configure_graph_checkpoint(
+        self,
+        checkpointer: BaseCheckpointSaver[str] | None,
+    ) -> None:
+        """应用启动探测成功后重新编译Graph；None表示明确关闭持久化。"""
+
+        self._graph_context = replace(
+            self._graph_context,
+            interrupt_enabled=checkpointer is not None,
+        )
+        self._graph = build_week9b_graph(checkpointer=checkpointer)
 
     async def create(self, actor: UserContext, title: str) -> Conversation:
         """创建新会话。"""
@@ -127,6 +167,129 @@ class ConversationService:
             await session.commit()
             return messages
 
+    async def list_pending_reviews(
+        self,
+        actor: UserContext,
+    ) -> list[PendingGraphReviewView]:
+        """列出待审核执行；只有配置的运营审核员可访问。"""
+
+        self._require_reviewer(actor)
+        async with self._database.session() as session:
+            rows = await GraphReviewRepository(session).list_pending()
+            return [PendingGraphReviewView.model_validate(item) for item in rows]
+
+    async def execution(
+        self,
+        *,
+        actor: UserContext,
+        thread_id: str,
+        execution_request_id: str,
+    ) -> GraphExecutionView:
+        """读取安全Graph状态；会话所有者或审核员可查看。"""
+
+        await self._authorize_execution_access(actor, thread_id)
+        if not self._graph_context.interrupt_enabled:
+            raise ResourceNotFoundError("Graph持久化未启用，无法查询历史执行")
+        config = _graph_config(thread_id, execution_request_id, actor.external_id)
+        snapshot = await self._graph.aget_state(config)
+        if not snapshot.values:
+            raise ResourceNotFoundError("Graph执行不存在或已过期")
+        return _execution_view_from_snapshot(
+            snapshot,
+            thread_id=thread_id,
+            request_id=execution_request_id,
+        )
+
+    async def resume_execution(
+        self,
+        *,
+        actor: UserContext,
+        thread_id: str,
+        execution_request_id: str,
+        decision: str,
+        note: str,
+        request_id: str,
+    ) -> ConversationMessageResult:
+        """审核员原子领取任务，并用Command(resume=...)恢复原MongoDB Checkpoint。"""
+
+        self._require_reviewer(actor)
+        execution_id = _execution_id(thread_id, execution_request_id)
+        async with self._database.session() as session:
+            users = UserRepository(session)
+            reviewer = await users.get_or_create(actor.external_id, actor.display_name)
+            conversation = await ConversationRepository(session).get_by_thread_id(thread_id)
+            if conversation is None:
+                raise ResourceNotFoundError("会话不存在")
+            reviews = GraphReviewRepository(session)
+            review = await reviews.by_execution(execution_id)
+            if review is None or review.conversation_id != conversation.id:
+                raise ResourceNotFoundError("待审核Graph执行不存在")
+            claimed = await reviews.claim(
+                execution_id,
+                reviewed_by_user_id=reviewer.id,
+            )
+            if claimed is None:
+                raise ConflictError("该Graph执行已被其他审核员处理")
+            await session.commit()
+
+        started = perf_counter()
+        config = _graph_config(thread_id, execution_request_id, actor.external_id)
+        try:
+            result = await self._graph.ainvoke(
+                Command(
+                    resume={
+                        "decision": decision,
+                        "note": note,
+                        "reviewer_id": actor.external_id,
+                    }
+                ),
+                config=config,
+                context=self._graph_context,
+            )
+        except Exception:
+            await self._release_review_claim(execution_id)
+            raise
+
+        if _first_interrupt_payload(result.get("__interrupt__", ())) is not None:
+            await self._release_review_claim(execution_id)
+            raise ConflictError("Graph恢复后再次中断，请刷新执行状态")
+        state = cast(CustomerServiceGraphState, result)
+        route_plan = _route_plan_from_state(state)
+        snapshot = await self._graph.aget_state(config)
+        execution = _execution_view_from_snapshot(
+            snapshot,
+            thread_id=thread_id,
+            request_id=execution_request_id,
+        )
+        outcome = _GraphExecutionOutcome(
+            route_plan=route_plan,
+            answer=state["answer"],
+            model=state["model"],
+            finish_reason=FinishReason(state["finish_reason"]),
+            usage=TokenUsage.model_validate(state["usage"]),
+            prompt_version=state["prompt_version"],
+            execution=execution,
+        )
+        await self._persist_resume_outcome(
+            actor=actor,
+            execution_id=execution_id,
+            request_id=request_id,
+            decision=decision,
+            note=note,
+            outcome=outcome,
+            started=started,
+        )
+        return ConversationMessageResult(
+            thread_id=thread_id,
+            answer=outcome.answer,
+            model=outcome.model,
+            finish_reason=outcome.finish_reason,
+            usage=outcome.usage,
+            prompt_version=outcome.prompt_version,
+            routing=outcome.route_plan.summary,
+            execution=outcome.execution,
+        )
+
     async def send(
         self,
         *,
@@ -153,60 +316,19 @@ class ConversationService:
         started = perf_counter()
         route_plan: CustomerServiceRoutePlan | None = None
         try:
-            route_plan = await self._router.route(content)
-            execution = await self._prepare_knowledge_execution(
+            outcome = await self._run_graph(
                 actor=actor,
-                question=content,
+                thread_id=thread_id,
+                content=content,
+                request_id=request_id,
                 history=history,
-                route_plan=route_plan,
             )
-            route_plan = execution.route_plan
-            if execution.response_override is not None:
-                answer = execution.response_override
-                model = "deterministic-knowledge"
-                finish_reason = FinishReason.STOP
-                usage = TokenUsage(
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
-                )
-                prompt_version = "knowledge_retrieval:v1"
-            elif route_plan.use_chat_model:
-                if execution.evidence_context is not None:
-                    grounded = await self._chat.complete_grounded(
-                        request_id=request_id,
-                        user_message=content,
-                        history=history,
-                        evidence_context=execution.evidence_context,
-                    )
-                    route_plan = _with_grounding_result(route_plan, grounded)
-                    answer = _publishable_grounded_answer(grounded)
-                    model = grounded.response.model
-                    finish_reason = grounded.response.finish_reason
-                    usage = grounded.response.usage
-                    prompt_version = grounded.prompt_version
-                else:
-                    result = await self._chat.complete(
-                        request_id=request_id,
-                        user_message=content,
-                        history=history,
-                    )
-                    answer = result.response.content
-                    model = result.response.model
-                    finish_reason = result.response.finish_reason
-                    usage = result.response.usage
-                    prompt_version = result.prompt_version
-            else:
-                # 确定性路径：路由直接返回固定回复（安全拦截/澄清/转人工等）。
-                answer = _required_override(route_plan)
-                model = "deterministic-routing"
-                finish_reason = FinishReason.STOP
-                usage = TokenUsage(
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
-                )
-                prompt_version = "customer_service_router:v1"
+            route_plan = outcome.route_plan
+            answer = outcome.answer
+            model = outcome.model
+            finish_reason = outcome.finish_reason
+            usage = outcome.usage
+            prompt_version = outcome.prompt_version
         except asyncio.CancelledError:
             await self._persist_outcome(
                 conversation_id=conversation_id,
@@ -262,6 +384,14 @@ class ConversationService:
             model=model,
             prompt_version=prompt_version,
         )
+        if outcome.execution.status is GraphExecutionStatus.INTERRUPTED:
+            await self._ensure_pending_review(
+                actor=actor,
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                route_plan=outcome.route_plan,
+                execution=outcome.execution,
+            )
         if route_plan is None:
             raise AssertionError("successful response requires a route plan")
         return ConversationMessageResult(
@@ -272,6 +402,7 @@ class ConversationService:
             usage=usage,
             prompt_version=prompt_version,
             routing=route_plan.summary,
+            execution=outcome.execution,
         )
 
     async def stream(
@@ -304,87 +435,41 @@ class ConversationService:
         model: str | None = None
         prompt_version: str | None = None
         try:
-            route_plan = await self._router.route(content)
-            execution = await self._prepare_knowledge_execution(
+            # 9B统一执行Graph；SSE仍保持route→delta→completed协议。知识回答必须在
+            # Grounded结构和NLI全部通过后才能一次性发布，因此不流出未经验证的Token。
+            outcome = await self._run_graph(
                 actor=actor,
-                question=content,
+                thread_id=thread_id,
+                content=content,
+                request_id=request_id,
                 history=history,
-                route_plan=route_plan,
             )
-            route_plan = execution.route_plan
-            if execution.response_override is not None:
-                yield CustomerServiceStreamChunk(routing=route_plan.summary)
-                response = execution.response_override
-                model = "deterministic-knowledge"
-                prompt_version = "knowledge_retrieval:v1"
-                usage = TokenUsage(
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
+            route_plan = outcome.route_plan
+            model = outcome.model
+            prompt_version = outcome.prompt_version
+            usage = outcome.usage
+            if outcome.execution.status is GraphExecutionStatus.INTERRUPTED:
+                await self._ensure_pending_review(
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    route_plan=outcome.route_plan,
+                    execution=outcome.execution,
                 )
-                answer_parts.append(response)
-                yield CustomerServiceStreamChunk(delta=response)
-                yield CustomerServiceStreamChunk(
-                    finish_reason=FinishReason.STOP,
-                    usage=usage,
-                )
-            elif route_plan.use_chat_model:
-                if execution.evidence_context is not None:
-                    # 结构化知识回答必须完整组装并验证后才能发布，不能边生成边泄露未校验Claim。
-                    grounded = await self._chat.complete_grounded(
-                        request_id=request_id,
-                        user_message=content,
-                        history=history,
-                        evidence_context=execution.evidence_context,
-                    )
-                    route_plan = _with_grounding_result(route_plan, grounded)
-                    yield CustomerServiceStreamChunk(routing=route_plan.summary)
-                    response = _publishable_grounded_answer(grounded)
-                    model = grounded.response.model
-                    prompt_version = grounded.prompt_version
-                    usage = grounded.response.usage
-                    answer_parts.append(response)
-                    yield CustomerServiceStreamChunk(delta=response)
-                    yield CustomerServiceStreamChunk(
-                        finish_reason=grounded.response.finish_reason,
-                        usage=usage,
-                    )
-                else:
-                    yield CustomerServiceStreamChunk(routing=route_plan.summary)
-                    model = self._chat.model
-                    prompt_version = self._chat.prompt_version
-                    async for chunk in self._chat.stream(
-                        request_id=request_id,
-                        user_message=content,
-                        history=history,
-                    ):
-                        if chunk.delta:
-                            answer_parts.append(chunk.delta)
-                        usage = chunk.usage or usage
-                        yield CustomerServiceStreamChunk(
-                            delta=chunk.delta,
-                            finish_reason=chunk.finish_reason,
-                            usage=chunk.usage,
-                        )
-            else:
-                # 确定性流式路径：一次性返回固定回复。
-                yield CustomerServiceStreamChunk(routing=route_plan.summary)
-                response = _required_override(route_plan)
-                model = "deterministic-routing"
-                prompt_version = "customer_service_router:v1"
-                usage = TokenUsage(
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
-                )
-                answer_parts.append(response)
-                yield CustomerServiceStreamChunk(delta=response)
-                yield CustomerServiceStreamChunk(
-                    finish_reason=FinishReason.STOP,
-                    usage=usage,
-                )
+            answer_parts.append(outcome.answer)
+            yield CustomerServiceStreamChunk(
+                routing=route_plan.summary,
+                execution_status=outcome.execution.status.value,
+                execution_id=outcome.execution.execution_id,
+            )
+            yield CustomerServiceStreamChunk(delta=outcome.answer)
+            yield CustomerServiceStreamChunk(
+                finish_reason=outcome.finish_reason,
+                usage=usage,
+            )
             status = "success"
             error_code = None
+            return
         except asyncio.CancelledError:
             error_code = "cancelled"
             raise
@@ -412,135 +497,239 @@ class ConversationService:
                 prompt_version=prompt_version,
             )
 
-    async def _prepare_knowledge_execution(
+    async def _run_graph(
         self,
         *,
         actor: UserContext,
-        question: str,
+        thread_id: str,
+        content: str,
+        request_id: str,
         history: list[ChatMessage],
-        route_plan: CustomerServiceRoutePlan,
-    ) -> _KnowledgeExecution:
-        """知识路由先取可信Parent；无证据或依赖故障时禁止自由模型回答。"""
+    ) -> _GraphExecutionOutcome:
+        """执行9C Graph；可能完成，也可能在真实interrupt处返回待审核状态。"""
 
-        if route_plan.summary.target is not CustomerServiceTarget.KNOWLEDGE_RAG:
-            return _KnowledgeExecution(route_plan=route_plan)
-        domains = route_plan.summary.business_domains
-        if not domains:
-            return self._knowledge_fallback(
+        graph_input = create_week9b_graph_input(
+            request_id=request_id,
+            thread_id=thread_id,
+            user_id=actor.external_id,
+            display_name=actor.display_name,
+            question=content,
+            history=[item.model_dump(mode="json") for item in history],
+        )
+        # 每条消息是独立Graph执行单元；conversation_id保留业务会话语义，request_id
+        # 防止多轮Reducer相互污染，也便于按请求恢复和审计。
+        execution_id = f"{thread_id}:{request_id}"
+        config = _graph_config(thread_id, request_id, actor.external_id)
+        result = await self._graph.ainvoke(
+            graph_input,
+            config=config,
+            context=self._graph_context,
+        )
+        raw_interrupts = result.get("__interrupt__", ())
+        state = cast(CustomerServiceGraphState, result)
+        route_payload = dict(state["route_plan"])
+        route_payload["intent_decision"] = state.get("intent_decision")
+        route_plan = CustomerServiceRoutePlan.model_validate(route_payload)
+        interrupt_payload = _first_interrupt_payload(raw_interrupts)
+        snapshot = (
+            await self._graph.aget_state(config)
+            if self._graph_context.interrupt_enabled
+            else None
+        )
+        if interrupt_payload is not None:
+            if snapshot is None:  # pragma: no cover - interrupt只会在持久化模式启用
+                raise AssertionError("interrupt requires a persistent checkpointer")
+            execution = GraphExecutionView(
+                execution_id=execution_id,
+                thread_id=thread_id,
+                request_id=request_id,
+                status=GraphExecutionStatus.INTERRUPTED,
+                current_node=state.get("current_node", "classify_intent"),
+                next_nodes=tuple(snapshot.next),
+                visited_nodes=tuple(state.get("visited_nodes", ())),
+                route_target=route_plan.summary.target.value,
+                review_status="pending",
+                interrupt=interrupt_payload,
+            )
+            return _GraphExecutionOutcome(
                 route_plan=route_plan,
-                domains=(),
-                error_code="missing_business_domain",
-                response=(
-                    "当前无法确定需要查询的知识领域，本次未生成无依据答案。"
-                    "请补充你要咨询的具体业务。"
+                answer="该请求已安全暂停，正在等待人工审核；审核前不会执行后续操作。",
+                model="deterministic-workflow",
+                finish_reason=FinishReason.STOP,
+                usage=TokenUsage(
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
                 ),
+                prompt_version="human_interrupt:v1",
+                execution=execution,
             )
-
-        results = []
-        policy_results: list[PolicyRetrievalResult] = []
-        decision = route_plan.intent_decision
-        if decision is None:
-            return self._knowledge_fallback(
-                route_plan=route_plan,
-                domains=domains,
-                error_code="missing_intent_decision",
-                response="当前缺少可信意图信息，本次未生成无依据答案。",
-            )
-        try:
-            for domain in domains:
-                policy_result = await self._policy_retrieval.retrieve(
-                    actor=actor,
-                    question=question,
-                    domain=domain,
-                    actions=tuple(
-                        item.action for item in decision.intents if item.domain is domain
-                    ),
-                    entities=decision.entities,
-                    history=tuple(history[-20:]),
-                    mode=self._customer_retrieval_mode,
-                )
-                policy_results.append(policy_result)
-                results.append((domain, policy_result.view))
-        except AppError as exc:
-            return self._knowledge_fallback(
-                route_plan=route_plan,
-                domains=domains,
-                error_code=exc.code.value,
-                response=("知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"),
-            )
-        except Exception:
-            return self._knowledge_fallback(
-                route_plan=route_plan,
-                domains=domains,
-                error_code="knowledge_retrieval_failed",
-                response=("知识服务暂时不可用，本次没有根据不完整信息生成答案。请稍后重试。"),
-            )
-
-        bundle = build_knowledge_evidence(
-            results=results,
-            mode=self._customer_retrieval_mode,
+        execution = GraphExecutionView(
+            execution_id=execution_id,
+            thread_id=thread_id,
+            request_id=request_id,
+            status=GraphExecutionStatus.COMPLETED,
+            current_node=state["current_node"],
+            next_nodes=tuple(snapshot.next) if snapshot is not None else (),
+            visited_nodes=tuple(state.get("visited_nodes", ())),
+            route_target=route_plan.summary.target.value,
+            review_status=state.get("review_status"),
+            answer=state.get("answer"),
         )
-        selected_policy_result = max(
-            policy_results,
-            key=lambda item: {
-                RetrievalDecisionKind.ANSWER: 0,
-                RetrievalDecisionKind.CLARIFY: 1,
-                RetrievalDecisionKind.REFUSE: 2,
-            }[item.quality.kind],
-        )
-        trace = bundle.trace.model_copy(
-            update={
-                "policy": selected_policy_result.policy_trace,
-                "coverage": selected_policy_result.coverage,
-            }
-        )
-        updated_plan = route_plan.model_copy(
-            update={"summary": route_plan.summary.model_copy(update={"retrieval": trace})}
-        )
-        if selected_policy_result.quality.kind is RetrievalDecisionKind.REFUSE:
-            return _KnowledgeExecution(
-                route_plan=updated_plan,
-                response_override=(
-                    "当前知识库中没有找到足够依据，或现有依据相关性不足，暂时无法确认该问题。"
-                ),
-            )
-        if selected_policy_result.quality.kind is RetrievalDecisionKind.CLARIFY:
-            return _KnowledgeExecution(
-                route_plan=updated_plan,
-                response_override=(
-                    selected_policy_result.quality.clarification_question
-                    or "当前证据不完整，请补充更具体的信息。"
-                ),
-            )
-        return _KnowledgeExecution(
-            route_plan=updated_plan,
-            evidence_context=bundle.context_json,
+        return _GraphExecutionOutcome(
+            route_plan=route_plan,
+            answer=state["answer"],
+            model=state["model"],
+            finish_reason=FinishReason(state["finish_reason"]),
+            usage=TokenUsage.model_validate(state["usage"]),
+            prompt_version=state["prompt_version"],
+            execution=execution,
         )
 
-    def _knowledge_fallback(
+    async def _ensure_pending_review(
         self,
         *,
+        actor: UserContext,
+        conversation_id: str,
+        user_message_id: str,
         route_plan: CustomerServiceRoutePlan,
-        domains: tuple[BusinessDomain, ...],
-        error_code: str,
-        response: str,
-    ) -> _KnowledgeExecution:
-        """把检索错误压缩成安全Trace，不泄露Provider异常或数据库细节。"""
+        execution: GraphExecutionView,
+    ) -> None:
+        """把MongoDB中断同步成MySQL运营任务，重复调用保持幂等。"""
 
-        trace = KnowledgeRetrievalTrace(
-            mode=self._customer_retrieval_mode,
-            business_domains=domains,
-            child_hit_count=0,
-            evidence_count=0,
-            error_code=error_code,
-        )
-        updated_plan = route_plan.model_copy(
-            update={"summary": route_plan.summary.model_copy(update={"retrieval": trace})}
-        )
-        return _KnowledgeExecution(
-            route_plan=updated_plan,
-            response_override=response,
-        )
+        payload = execution.interrupt or {}
+        # 原问题只保存在加密Checkpoint和既有消息表，审核表不再复制一份可能含PII的文本。
+        audit_payload = {
+            key: payload[key]
+            for key in (
+                "kind",
+                "request_id",
+                "conversation_thread_id",
+                "target",
+                "risk",
+            )
+            if key in payload
+        }
+        async with self._database.session() as session:
+            users = UserRepository(session)
+            requester = await users.get_or_create(actor.external_id, actor.display_name)
+            reviews = GraphReviewRepository(session)
+            if await reviews.by_execution(execution.execution_id) is None:
+                reviews.add(
+                    GraphReview(
+                        execution_id=execution.execution_id,
+                        conversation_id=conversation_id,
+                        user_message_id=user_message_id,
+                        requested_by_user_id=requester.id,
+                        thread_id=execution.thread_id,
+                        request_id=execution.request_id,
+                        target=route_plan.summary.target.value,
+                        reason=str(
+                            payload.get("reason")
+                            or route_plan.response_override
+                            or "该请求需要人工审核。"
+                        )[:500],
+                        interrupt_payload=audit_payload,
+                        status="pending",
+                    )
+                )
+            await session.commit()
+
+    async def _persist_resume_outcome(
+        self,
+        *,
+        actor: UserContext,
+        execution_id: str,
+        request_id: str,
+        decision: str,
+        note: str,
+        outcome: _GraphExecutionOutcome,
+        started: float,
+    ) -> None:
+        """在同一MySQL事务中结束审核、写助手消息和ModelCall审计。"""
+
+        async with self._database.session() as session:
+            users = UserRepository(session)
+            reviewer = await users.get_or_create(actor.external_id, actor.display_name)
+            reviews = GraphReviewRepository(session)
+            review = await reviews.by_execution(execution_id)
+            if review is None or review.status != "processing":
+                raise ConflictError("审核任务状态已变化")
+            GraphReviewRepository.resolve(
+                review,
+                approved=decision == "approve",
+                reviewed_by_user_id=reviewer.id,
+                note=note,
+            )
+            assistant = MessageRepository(session).add(
+                conversation_id=review.conversation_id,
+                role=MessageRole.ASSISTANT.value,
+                content=outcome.answer,
+                request_id=request_id,
+            )
+            await session.flush()
+            ModelCallRepository(session).add(
+                ModelCall(
+                    conversation_id=review.conversation_id,
+                    user_message_id=review.user_message_id,
+                    assistant_message_id=assistant.id,
+                    request_id=request_id,
+                    operation=f"resume:{outcome.route_plan.summary.target.value}",
+                    model=outcome.model,
+                    prompt_version=outcome.prompt_version,
+                    status="success",
+                    latency_ms=(perf_counter() - started) * 1000,
+                    prompt_tokens=outcome.usage.prompt_tokens,
+                    completion_tokens=outcome.usage.completion_tokens,
+                    total_tokens=outcome.usage.total_tokens,
+                    error_code=None,
+                )
+            )
+            conversation_id = review.conversation_id
+            await session.commit()
+        cached = await self._cached_history_by_conversation(conversation_id)
+        if cached is not None:
+            thread_id, history, cache_hit = cached
+            await self._store_history(
+                thread_id,
+                history
+                if not cache_hit
+                else [
+                    *history,
+                    ChatMessage(role=MessageRole.ASSISTANT, content=outcome.answer),
+                ],
+            )
+
+    async def _release_review_claim(self, execution_id: str) -> None:
+        """恢复失败时把processing任务退回pending，允许安全重试。"""
+
+        async with self._database.session() as session:
+            review = await GraphReviewRepository(session).by_execution(execution_id)
+            if review is not None and review.status == "processing":
+                GraphReviewRepository.release_claim(review)
+                await session.commit()
+
+    async def _authorize_execution_access(
+        self,
+        actor: UserContext,
+        thread_id: str,
+    ) -> None:
+        """会话所有者可查看；运营审核员可以跨用户查看。"""
+
+        async with self._database.session() as session:
+            users = UserRepository(session)
+            user = await users.get_or_create(actor.external_id, actor.display_name)
+            if actor.external_id not in self._review_admin_user_ids:
+                await self._owned_conversation(session, thread_id, user.id)
+            elif await ConversationRepository(session).get_by_thread_id(thread_id) is None:
+                raise ResourceNotFoundError("会话不存在")
+            await session.commit()
+
+    def _require_reviewer(self, actor: UserContext) -> None:
+        """本地白名单RBAC；生产应由SSO/JWT角色映射替换。"""
+
+        if actor.external_id not in self._review_admin_user_ids:
+            raise ForbiddenError("只有客服审核员可以恢复Graph执行")
 
     async def _save_user_message(
         self,
@@ -701,71 +890,6 @@ class ConversationService:
         return conversation
 
 
-def _required_override(route_plan: CustomerServiceRoutePlan) -> str:
-    """提取确定性路由的固定回复文本，为 None 时说明路由配置错误。"""
-    response = route_plan.response_override
-    if response is None:
-        raise AssertionError("deterministic route requires response_override")
-    return response
-
-
-def _publishable_grounded_answer(result: GroundedChatCompletionResult) -> str:
-    """执行8E发布策略：全量通过发原文，部分通过只用已核验Claim重建。"""
-
-    if result.error_code is not None or result.grounded_answer is None:
-        return (
-            "知识回答未通过结构或引用校验，本次没有展示未经验证的模型内容。"
-            "请换一种描述重试，或转人工核查。"
-        )
-    verification = result.verification
-    if verification is None:
-        return "知识校验服务未返回结果，本次已安全拦截。请稍后重试或转人工核查。"
-    if verification.mode is VerificationMode.SHADOW and not verification.hard_gate_failed:
-        return result.grounded_answer.answer
-    if verification.decision is GroundedVerificationDecision.PASS:
-        return result.grounded_answer.answer
-
-    supported = tuple(
-        claim for claim in verification.claims if claim.status is ClaimSupportStatus.SUPPORTED
-    )
-    if supported and not verification.hard_gate_failed:
-        # 不再调用生成模型二次改写，逐Claim拼接可追溯引用，避免重新引入幻觉。
-        statements = []
-        for claim in supported:
-            text = claim.claim_text.rstrip("。！？； ")
-            citations = "".join(f"[{item}]" for item in claim.evidence_ids)
-            statements.append(f"{text}{citations}。")
-        return "".join(statements) + "其余内容证据不足，建议补充信息或转人工核查。"
-
-    if verification.decision is GroundedVerificationDecision.DEGRADE:
-        return "当前证据或语义校验不足，无法形成可靠回答。请缩小问题范围或转人工核查。"
-    return "当前生成内容存在缺少证据支持或证据冲突，本次已安全拦截。请补充信息或转人工核查。"
-
-
-def _with_grounding_result(
-    route_plan: CustomerServiceRoutePlan,
-    result: GroundedChatCompletionResult,
-) -> CustomerServiceRoutePlan:
-    """把实际引用和验证结论附加到公开Trace，候选证据与最终引用由此分离。"""
-
-    retrieval = route_plan.summary.retrieval
-    if retrieval is None:
-        return route_plan
-    used_ids = (
-        result.grounded_answer.used_evidence_ids if result.grounded_answer is not None else ()
-    )
-    updated_retrieval = retrieval.model_copy(
-        update={
-            "used_evidence_ids": used_ids,
-            "verification": result.verification,
-            "grounding_error_code": result.error_code,
-        }
-    )
-    return route_plan.model_copy(
-        update={"summary": route_plan.summary.model_copy(update={"retrieval": updated_retrieval})}
-    )
-
-
 def _routed_operation(
     base: str,
     route_plan: CustomerServiceRoutePlan | None,
@@ -774,3 +898,82 @@ def _routed_operation(
     if route_plan is None:
         return f"{base}:routing_error"
     return f"{base}:{route_plan.summary.target.value}"
+
+
+def _execution_id(thread_id: str, request_id: str) -> str:
+    return f"{thread_id}:{request_id}"
+
+
+def _graph_config(
+    thread_id: str,
+    request_id: str,
+    actor_external_id: str,
+) -> RunnableConfig:
+    """集中构造Checkpoint身份和可检索元数据。"""
+
+    return {
+        "recursion_limit": MAX_GRAPH_STEPS,
+        "configurable": {"thread_id": _execution_id(thread_id, request_id)},
+        "metadata": {
+            "user_id": actor_external_id,
+            "conversation_thread_id": thread_id,
+            "request_id": request_id,
+        },
+    }
+
+
+def _route_plan_from_state(state: CustomerServiceGraphState) -> CustomerServiceRoutePlan:
+    payload = dict(state["route_plan"])
+    payload["intent_decision"] = state.get("intent_decision")
+    return CustomerServiceRoutePlan.model_validate(payload)
+
+
+def _first_interrupt_payload(raw_interrupts: object) -> dict[str, object] | None:
+    """兼容LangGraph Interrupt对象，并只公开字典型安全载荷。"""
+
+    if not isinstance(raw_interrupts, (tuple, list)) or not raw_interrupts:
+        return None
+    value = getattr(raw_interrupts[0], "value", raw_interrupts[0])
+    if not isinstance(value, dict):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def _snapshot_interrupt(snapshot: StateSnapshot) -> dict[str, object] | None:
+    for task in snapshot.tasks:
+        payload = _first_interrupt_payload(task.interrupts)
+        if payload is not None:
+            return payload
+    return None
+
+
+def _execution_view_from_snapshot(
+    snapshot: StateSnapshot,
+    *,
+    thread_id: str,
+    request_id: str,
+) -> GraphExecutionView:
+    state = cast(CustomerServiceGraphState, snapshot.values)
+    payload = _snapshot_interrupt(snapshot)
+    if payload is not None:
+        status = GraphExecutionStatus.INTERRUPTED
+    elif state.get("status") == GraphRunStatus.FAILED:
+        status = GraphExecutionStatus.FAILED
+    else:
+        status = GraphExecutionStatus.COMPLETED
+    route_payload = state.get("route_plan") or {}
+    summary = route_payload.get("summary")
+    route_target = summary.get("target") if isinstance(summary, dict) else None
+    return GraphExecutionView(
+        execution_id=_execution_id(thread_id, request_id),
+        thread_id=thread_id,
+        request_id=request_id,
+        status=status,
+        current_node=state.get("current_node", ""),
+        next_nodes=tuple(snapshot.next),
+        visited_nodes=tuple(state.get("visited_nodes", ())),
+        route_target=str(route_target) if route_target is not None else None,
+        review_status=("pending" if payload is not None else state.get("review_status")),
+        interrupt=payload,
+        answer=state.get("answer"),
+    )

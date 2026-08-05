@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from bili_support.intent.types import IntentDecision
+from bili_support.llm.errors import LLMResponseError
 from bili_support.llm.prompts import PromptRegistry
 from bili_support.llm.provider import LLMProvider
-from bili_support.llm.structured import StructuredOutputParser, StructuredOutputResult
-from bili_support.llm.types import LLMRequest
+from bili_support.llm.structured import (
+    StructuredOutputError,
+    StructuredOutputParser,
+    StructuredOutputResult,
+)
+from bili_support.llm.types import FinishReason, LLMRequest
 
 
 class IntentClassifier:
@@ -72,8 +77,22 @@ class IntentClassifier:
         request = self.build_request(question)
         for attempt in range(self._parse_retries + 1):
             # HTTP 重试由 Provider 负责；这里只处理“响应成功但结构不合法”。
-            response = await self._provider.complete(request)
-            result = self._parser.parse(response.content)
+            try:
+                response = await self._provider.complete(request)
+            except LLMResponseError:
+                # 供应商偶尔返回200但content为空；结构化任务允许有限次独立重试。
+                if attempt >= self._parse_retries:
+                    raise
+                request = self._repair_request(request)
+                continue
+            # length表示输出预算耗尽；即使前缀碰巧像JSON，也不能用于正式路由。
+            result = (
+                StructuredOutputResult[IntentDecision](
+                    error_code=StructuredOutputError.TRUNCATED_RESPONSE
+                )
+                if response.finish_reason is FinishReason.LENGTH
+                else self._parser.parse(response.content)
+            )
             if result.value is not None or attempt >= self._parse_retries:
                 return result
             request = self._repair_request(request)

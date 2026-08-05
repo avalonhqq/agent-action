@@ -25,11 +25,17 @@ from bili_support.llm.context import (
     QueryRewriteResult,
     StandaloneQueryRewriter,
 )
+from bili_support.llm.errors import LLMResponseError
 from bili_support.llm.prompts import PromptRegistry
 from bili_support.llm.provider import LLMProvider
-from bili_support.llm.structured import StructuredOutputParser
+from bili_support.llm.structured import (
+    StructuredOutputError,
+    StructuredOutputParser,
+    StructuredOutputResult,
+)
 from bili_support.llm.types import (
     ChatMessage,
+    FinishReason,
     LLMRequest,
     LLMResponse,
     StreamChunk,
@@ -85,12 +91,15 @@ class ChatService:
         rewriter: StandaloneQueryRewriter | None = None,
         temperature: float = 0.0,
         max_tokens: int = 512,
+        grounded_max_tokens: int | None = None,
         timeout_seconds: float = 30.0,
         grounded_parse_retries: int = 1,
         claim_verifier: ClaimVerifier | None = None,
     ) -> None:
         if not 0 <= grounded_parse_retries <= 2:
             raise ValueError("grounded_parse_retries must be between zero and two")
+        if grounded_max_tokens is not None and grounded_max_tokens <= 0:
+            raise ValueError("grounded_max_tokens must be greater than zero")
         self._provider = provider
         self._model = model
         self._prompt_registry = prompt_registry
@@ -99,6 +108,7 @@ class ChatService:
         self._rewriter = rewriter or StandaloneQueryRewriter()
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._grounded_max_tokens = grounded_max_tokens or max_tokens
         self._timeout_seconds = timeout_seconds
         self._grounded_parse_retries = grounded_parse_retries
         # 生产入口注入真实NLI；None仅用于离线兼容工具和不触发语义推理的单元测试。
@@ -125,8 +135,9 @@ class ChatService:
         user_message: str,
         history: list[ChatMessage],
         evidence_context: str,
+        verify_claims: bool = True,
     ) -> GroundedChatCompletionResult:
-        """使用v2生成完整JSON，完成结构、ID白名单和8B声明支持度校验。"""
+        """生成严格JSON并校验引用；默认兼容旧链路继续执行NLI。"""
 
         parser = StructuredOutputParser(GroundedAnswer)
         request, rewrite, prompt_version = self._prepare_grounded(
@@ -153,6 +164,20 @@ class ChatService:
                     "cancelled",
                 )
                 raise
+            except LLMResponseError as exc:
+                await self._record(
+                    request_id,
+                    operation,
+                    prompt_version,
+                    started,
+                    UsageStatus.ERROR,
+                    None,
+                    exc.code.value,
+                )
+                if attempt < self._grounded_parse_retries:
+                    request = self._repair_grounded_request(request)
+                    continue
+                raise
             except AppError as exc:
                 await self._record(
                     request_id,
@@ -177,7 +202,14 @@ class ChatService:
                 raise
 
             total_usage = _sum_usage(total_usage, response.usage)
-            parsed = parser.parse(response.content)
+            # 推理模型可能以length结束并只返回半个JSON，单独标记后走格式修复重试。
+            parsed = (
+                StructuredOutputResult[GroundedAnswer](
+                    error_code=StructuredOutputError.TRUNCATED_RESPONSE
+                )
+                if response.finish_reason is FinishReason.LENGTH
+                else parser.parse(response.content)
+            )
             parse_error = parsed.error_code.value if parsed.error_code is not None else None
             if parsed.value is None and attempt < self._grounded_parse_retries:
                 await self._record(
@@ -205,11 +237,12 @@ class ChatService:
                     error_code = exc.code.value
                     grounded = None
                 else:
-                    verification = (
-                        await self._claim_verifier.verify(grounded, evidence=evidence)
-                        if self._claim_verifier is not None
-                        else verify_grounded_answer(grounded, evidence=evidence)
-                    )
+                    if verify_claims:
+                        verification = (
+                            await self._claim_verifier.verify(grounded, evidence=evidence)
+                            if self._claim_verifier is not None
+                            else verify_grounded_answer(grounded, evidence=evidence)
+                        )
 
             await self._record(
                 request_id,
@@ -229,6 +262,24 @@ class ChatService:
                 prompt_version=prompt_version,
             )
         raise AssertionError("grounded parse retry loop must return")
+
+    async def verify_grounded_completion(
+        self,
+        result: GroundedChatCompletionResult,
+        *,
+        evidence_context: str,
+    ) -> GroundedChatCompletionResult:
+        """9B独立NLI节点入口：验证已通过结构与引用白名单的Grounded对象。"""
+
+        if result.error_code is not None or result.grounded_answer is None:
+            return result
+        evidence = parse_evidence_records(evidence_context)
+        verification = (
+            await self._claim_verifier.verify(result.grounded_answer, evidence=evidence)
+            if self._claim_verifier is not None
+            else verify_grounded_answer(result.grounded_answer, evidence=evidence)
+        )
+        return result.model_copy(update={"verification": verification})
 
     async def complete(
         self,
@@ -389,7 +440,7 @@ class ChatService:
                 messages=window.messages,
                 model=self._model,
                 temperature=0.0,
-                max_tokens=self._max_tokens,
+                max_tokens=self._grounded_max_tokens,
                 timeout_seconds=self._timeout_seconds,
                 structured_output=structured_output.specification("grounded_answer"),
             ),

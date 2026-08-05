@@ -83,6 +83,8 @@ class CustomerServiceStreamChunk(BaseModel):
     finish_reason: FinishReason | None = None                # 流结束原因
     usage: TokenUsage | None = None                          # 本请求 Token 用量
     routing: CustomerServiceRouteSummary | None = None       # 首帧携带的路由摘要（仅首个 chunk）
+    execution_status: str | None = None                      # 9C：completed/interrupted
+    execution_id: str | None = None                          # MongoDB Checkpoint线程键
 
 
 class CustomerServiceRouter:

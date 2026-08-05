@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import InMemorySaver
 
 from bili_support.core.config import Settings
 from bili_support.llm.errors import LLMUnavailableError
@@ -300,3 +301,88 @@ def test_unsafe_route_skips_answer_model_and_is_auditable(tmp_path: Path) -> Non
             ("unsafe-route-1",),
         ).fetchone()
     assert call == ("complete:safety", "deterministic-routing", 0)
+
+
+def test_graph_interrupt_review_and_resume_is_persisted(tmp_path: Path) -> None:
+    """9C主路径：真实interrupt → 审核员领取 → Command恢复 → 审计落库。"""
+
+    database_path = tmp_path / "graph-review.db"
+    settings = _settings(database_path).model_copy(
+        update={
+            "graph_review_admin_user_ids": "review-admin",
+            "intent_mock_response": (
+                '{"route":"supported","intents":[{"domain":"account",'
+                '"action":"recover","confidence":0.99}],"entities":[],'
+                '"sentiment":"anxious","risk":"high","confidence":0.99,'
+                '"needs_clarification":false,"clarification_question":null,'
+                '"source":"model"}'
+            ),
+        }
+    )
+    app = create_app(settings, llm_provider=_UnavailableProvider())
+
+    with TestClient(app) as client:
+        # 测试使用内存Saver验证LangGraph协议；生产装配仍使用MongoDB Saver。
+        app.state.conversation_service.configure_graph_checkpoint(InMemorySaver())
+        created = client.post(
+            "/api/v1/conversations",
+            json={"title": "账号找回审核"},
+            headers=_headers(),
+        )
+        thread_id = created.json()["data"]["thread_id"]
+        interrupted = client.post(
+            f"/api/v1/conversations/{thread_id}/messages",
+            json={"content": "我的账号被盗，需要找回"},
+            headers=_headers(request_id="graph-interrupt-1"),
+        )
+        owner_status = client.get(
+            f"/api/v1/conversations/{thread_id}/executions/graph-interrupt-1",
+            headers=_headers(),
+        )
+        ordinary_pending = client.get(
+            "/api/v1/conversations/reviews/pending",
+            headers=_headers(),
+        )
+        pending = client.get(
+            "/api/v1/conversations/reviews/pending",
+            headers=_headers(user_id="review-admin"),
+        )
+        resumed = client.post(
+            f"/api/v1/conversations/{thread_id}/executions/graph-interrupt-1/resume",
+            json={"decision": "approve", "note": "身份材料已由客服核验"},
+            headers=_headers(user_id="review-admin", request_id="graph-resume-1"),
+        )
+        duplicate = client.post(
+            f"/api/v1/conversations/{thread_id}/executions/graph-interrupt-1/resume",
+            json={"decision": "approve", "note": "重复提交必须被拒绝"},
+            headers=_headers(user_id="review-admin", request_id="graph-resume-2"),
+        )
+
+    assert interrupted.status_code == 200
+    interrupted_data = interrupted.json()["data"]
+    assert interrupted_data["execution"]["status"] == "interrupted"
+    assert interrupted_data["execution"]["next_nodes"] == ["human_review"]
+    assert interrupted_data["routing"]["target"] == "human_review_mock"
+    assert owner_status.status_code == 200
+    assert owner_status.json()["data"]["interrupt"]["kind"] == "human_review"
+    assert ordinary_pending.status_code == 403
+    assert pending.status_code == 200
+    assert pending.json()["data"][0]["request_id"] == "graph-interrupt-1"
+    assert resumed.status_code == 200
+    resumed_data = resumed.json()["data"]
+    assert resumed_data["execution"]["status"] == "completed"
+    assert resumed_data["execution"]["review_status"] == "approved"
+    assert "人工审核已批准" in resumed_data["answer"]
+    assert duplicate.status_code == 409
+
+    with sqlite3.connect(database_path) as connection:
+        review = connection.execute(
+            "SELECT status, decision_note FROM graph_reviews WHERE request_id = ?",
+            ("graph-interrupt-1",),
+        ).fetchone()
+        resume_call = connection.execute(
+            "SELECT operation, status FROM model_calls WHERE request_id = ?",
+            ("graph-resume-1",),
+        ).fetchone()
+    assert review == ("approved", "身份材料已由客服核验")
+    assert resume_call == ("resume:human_review_mock", "success")

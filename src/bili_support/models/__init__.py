@@ -3,6 +3,7 @@
 from bili_support.models.base import Base
 from bili_support.models.entities import (
     Conversation,
+    GraphReview,
     KnowledgeChunk,
     KnowledgeDictionaryTerm,
     KnowledgeDictionaryVersion,
@@ -20,6 +21,7 @@ from bili_support.models.entities import (
 __all__ = [
     "Base",
     "Conversation",
+    "GraphReview",
     "KnowledgeChunk",
     "KnowledgeDocument",
     "KnowledgeDocumentVersion",

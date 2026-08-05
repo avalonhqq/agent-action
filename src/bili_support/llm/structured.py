@@ -15,6 +15,7 @@ class StructuredOutputError(StrEnum):
 
     INVALID_JSON = "invalid_json"
     SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
+    TRUNCATED_RESPONSE = "truncated_response"
 
 
 class StructuredOutputResult[T: BaseModel](BaseModel):

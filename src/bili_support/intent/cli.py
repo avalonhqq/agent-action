@@ -30,7 +30,7 @@ async def run_experiment(question: str, settings: Settings) -> int:
         prompt_registry=create_default_prompt_registry(),
         model=settings.llm_model,
         temperature=settings.llm_temperature,
-        max_tokens=settings.llm_max_tokens,
+        max_tokens=settings.llm_intent_max_tokens,
         timeout_seconds=settings.llm_timeout_seconds,
         parse_retries=settings.intent_parse_retries,
     )

@@ -35,6 +35,28 @@ def test_rewriter_preserves_standalone_or_ambiguous_question() -> None:
     assert ambiguous.reason is RewriteReason.UNCHANGED_UNSAFE
 
 
+def test_rewriter_completes_short_price_follow_up_from_previous_topic() -> None:
+    history = [
+        _message(MessageRole.USER, "大会员能做什么"),
+        _message(MessageRole.ASSISTANT, "可以观看部分会员专享内容。"),
+    ]
+
+    result = StandaloneQueryRewriter().rewrite("多少钱", history)
+
+    assert result.standalone_query == "大会员多少钱"
+    assert result.rewritten is True
+    assert result.reason is RewriteReason.CONTEXT_TOPIC_COMPLETION
+
+
+def test_rewriter_does_not_guess_topic_for_ambiguous_short_follow_up() -> None:
+    history = [_message(MessageRole.USER, "刚才那个功能怎么用")]
+
+    result = StandaloneQueryRewriter().rewrite("多少钱", history)
+
+    assert result.standalone_query == "多少钱"
+    assert result.reason is RewriteReason.UNCHANGED_UNSAFE
+
+
 def test_context_window_summarizes_old_history_and_preserves_recent_turns() -> None:
     builder = BoundedContextBuilder(max_messages=5)
     system = _message(MessageRole.SYSTEM, "系统约束")

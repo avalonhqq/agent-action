@@ -3,8 +3,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from bili_support.intent.types import (
     BusinessDomain,
     DecisionSource,
+    EntityType,
     IntentAction,
     IntentDecision,
+    IntentEntity,
     IntentRoute,
     RiskLevel,
     Sentiment,
@@ -27,6 +29,7 @@ _EXACT_HUMAN_TRANSFER_REQUESTS = frozenset(
         "联系人工客服",
     }
 )
+_MEMBERSHIP_PRICE_MARKERS = ("多少钱", "价格", "怎么收费", "费用")
 
 
 class RuleMatch(BaseModel):
@@ -59,6 +62,30 @@ class RuleIntentClassifier:
                 ),
             )
 
+        # 上下文改写会把“多少钱”补成“大会员多少钱”；这是高精度只读查询，
+        # 无需承担一次结构化模型空响应或截断的风险。
+        if "大会员" in normalized_question and any(
+            marker in normalized_question for marker in _MEMBERSHIP_PRICE_MARKERS
+        ):
+            return _build_low_risk_rule_match(
+                rule_id="membership.price_query:v1",
+                route=IntentRoute.SUPPORTED,
+                intents=(
+                    SubIntent(
+                        domain=BusinessDomain.MEMBERSHIP,
+                        action=IntentAction.QUERY,
+                        confidence=1.0,
+                    ),
+                ),
+                entities=(
+                    IntentEntity(
+                        type=EntityType.PRODUCT,
+                        raw_value="大会员",
+                        normalized_value="大会员",
+                    ),
+                ),
+            )
+
         return None
 
 
@@ -66,7 +93,8 @@ def _build_low_risk_rule_match(
         *,
         rule_id: str,
         route: IntentRoute,
-        intents: tuple[SubIntent, ...] = (),
+    intents: tuple[SubIntent, ...] = (),
+    entities: tuple[IntentEntity, ...] = (),
         sentiment: Sentiment = Sentiment.NEUTRAL,
 ) -> RuleMatch:
     return RuleMatch(
@@ -74,7 +102,7 @@ def _build_low_risk_rule_match(
         decision=IntentDecision(
             route=route,
             intents=intents,
-            entities=(),
+            entities=entities,
             sentiment=sentiment,
             risk=RiskLevel.LOW,
             confidence=1.0,

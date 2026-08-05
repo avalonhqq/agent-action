@@ -47,6 +47,8 @@ def test_default_settings() -> None:
     assert settings.log_level.value == "INFO"
     assert settings.llm_provider is LLMProviderKind.MOCK
     assert settings.llm_temperature == 0.0
+    assert settings.llm_intent_max_tokens == 1024
+    assert settings.llm_grounded_max_tokens == 2048
     assert settings.grounded_parse_retries == 1
     assert settings.embedding_provider is EmbeddingProviderKind.MOCK
     assert settings.embedding_dimension == 128

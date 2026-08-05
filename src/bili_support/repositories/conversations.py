@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,16 @@ class ConversationRepository:
             )
         )
         return result
+
+    async def get_by_thread_id(self, thread_id: str) -> Conversation | None:
+        """仅供已通过运营RBAC的跨用户审核流程使用。"""
+
+        return cast(
+            Conversation | None,
+            await self._session.scalar(
+                select(Conversation).where(Conversation.thread_id == thread_id)
+            ),
+        )
 
     def touch(self, conversation: Conversation) -> None:
         conversation.updated_at = datetime.now(UTC)

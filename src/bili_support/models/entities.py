@@ -100,6 +100,43 @@ class ModelCall(Base):
     )
 
 
+class GraphReview(TimestampMixin, Base):
+    """LangGraph人工中断的长期审核事实；Checkpoint仍保存在MongoDB。"""
+
+    __tablename__ = "graph_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'approved', 'rejected')",
+            name="status_allowed",
+        ),
+        UniqueConstraint("execution_id", name="uq_graph_reviews_execution_id"),
+        Index("ix_graph_reviews_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    execution_id: Mapped[str] = mapped_column(String(300), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    user_message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    )
+    requested_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    thread_id: Mapped[str] = mapped_column(String(36), index=True)
+    request_id: Mapped[str] = mapped_column(String(128), index=True)
+    target: Mapped[str] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(String(500))
+    interrupt_payload: Mapped[dict[str, object]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    decision_note: Mapped[str | None] = mapped_column(String(500))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class KnowledgeDocument(TimestampMixin, Base):
     """逻辑知识文档；文件内容变化只新增版本，不覆盖该身份。"""
 

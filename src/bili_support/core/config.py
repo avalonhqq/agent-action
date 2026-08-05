@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     llm_retry_base_delay: float = Field(default=0.1, ge=0)
     llm_temperature: float = Field(default=0.0, ge=0, le=2)
     llm_max_tokens: int = Field(default=512, gt=0)
+    # 推理模型可能先消耗隐藏推理Token；结构化任务需要独立输出预算。
+    llm_intent_max_tokens: int = Field(default=1024, ge=256, le=8192)
+    llm_grounded_max_tokens: int = Field(default=2048, ge=512, le=16384)
     llm_timeout_seconds: float = Field(default=30.0, gt=0)
     database_url: str = "sqlite+aiosqlite:///./data/bili_support.db"
     database_echo: bool = False
@@ -122,6 +125,8 @@ class Settings(BaseSettings):
     graph_checkpoint_ttl_seconds: int = Field(default=604800, ge=300, le=7776000)
     graph_checkpoint_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     graph_checkpoint_encryption_key: SecretStr | None = None
+    # 9C本地审核员白名单；生产身份必须由企业SSO/JWT角色声明替换。
+    graph_review_admin_user_ids: str = "review-admin"
     redis_enabled: bool = False
     redis_required: bool = False
     redis_url: SecretStr = SecretStr("redis://127.0.0.1:6379/0")
@@ -202,6 +207,7 @@ class Settings(BaseSettings):
         "graph_checkpoint_database",
         "graph_checkpoint_collection",
         "graph_checkpoint_writes_collection",
+        "graph_review_admin_user_ids",
         "knowledge_storage_dir",
         "embedding_model",
         "knowledge_index_chunk_schema_version",
